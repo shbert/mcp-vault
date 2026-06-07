@@ -395,14 +395,19 @@ async def _api_revoke_token(send, hash_prefix):
         return await _json_response(send, 400, {"status": "error", "message": "S3 non configuré"})
 
     result = store.revoke(hash_prefix)
-    status = result.get("status")
-    if status == "ok":
+    revoke_status = result.get("status")
+    # Normalise le corps de réponse : status="error" dans tous les cas d'échec
+    # (le status interne dict est distinct du status JSON retourné au client)
+    err_body = {"status": "error", "message": result.get("message", "Erreur révocation")}
+    if revoke_status == "ok":
         await _json_response(send, 200, result)
-    elif status == "storage_unavailable":
-        await _json_response(send, 503, {"status": "error", **result})
+    elif revoke_status == "storage_unavailable":
+        await _json_response(send, 503, err_body)
+    elif revoke_status == "invalid_prefix":
+        await _json_response(send, 400, err_body)  # mauvaise entrée → 400, pas 404
     else:
-        # not_found | ambiguous | invalid_prefix
-        await _json_response(send, 404, {"status": "error", **result})
+        # not_found | ambiguous
+        await _json_response(send, 404, err_body)
 
 
 async def _api_create_vault(send, body):

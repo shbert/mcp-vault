@@ -263,30 +263,37 @@ class TokenStore:
         if token.get("revoked"):
             return {"status": "error", "message": f"Token {hash_prefix}... est révoqué"}
 
-        updated_fields = []
-
-        # Snapshot AVANT toute mutation pour un rollback correct si _save échoue
-        import copy
-        snapshot = copy.deepcopy(dict(token))
-
-        if policy_id is not None:
-            # Convertit le sentinel "_remove" en "" pour compatibilité avec l'outil MCP
-            token["policy_id"] = "" if policy_id == "_remove" else policy_id
-            updated_fields.append("policy_id")
-
+        # ── TOUTES les validations AVANT toute mutation ──────────────────
         if permissions is not None:
             valid_perms = {"read", "write", "admin"}
             if not all(p in valid_perms for p in permissions):
                 return {"status": "error", "message": f"Permissions invalides: {permissions}"}
-            token["permissions"] = permissions
-            updated_fields.append("permissions")
 
+        updated_fields = []
+        if policy_id is not None:
+            updated_fields.append("policy_id")
+        if permissions is not None:
+            updated_fields.append("permissions")
         if allowed_resources is not None:
-            token["allowed_resources"] = allowed_resources
             updated_fields.append("allowed_resources")
 
         if not updated_fields:
             return {"status": "error", "message": "Aucun champ à modifier"}
+
+        # ── Snapshot AVANT mutation pour rollback si _save échoue ────────
+        import copy
+        snapshot = copy.deepcopy(dict(token))
+
+        # ── Mutations uniquement après validation et snapshot ─────────────
+        if policy_id is not None:
+            # Convertit le sentinel "_remove" en "" pour compatibilité avec l'outil MCP
+            token["policy_id"] = "" if policy_id == "_remove" else policy_id
+
+        if permissions is not None:
+            token["permissions"] = permissions
+
+        if allowed_resources is not None:
+            token["allowed_resources"] = allowed_resources
 
         if not self._save():
             self._tokens[target_hash].clear()
