@@ -38,16 +38,15 @@ async def vault_startup() -> bool:
     """
     settings = get_settings()
 
-    # ── 0. Validation de la bootstrap key ──────────────────────────
-    logger.info("🔐 Validation de la bootstrap key...")
+    # ── 0. Bootstrap key (défense en profondeur) ────────────────────
+    # La validation autoritaire (fail-fast) est dans server.main() avant tout
+    # démarrage : si on arrive ici, la clé est déjà validée. On revérifie quand
+    # même au cas où vault_startup() serait appelé hors du point d'entrée main().
     try:
         from .openbao.crypto import validate_bootstrap_key
         is_valid, msg = validate_bootstrap_key(settings.admin_bootstrap_key)
         if not is_valid:
-            logger.warning(f"⚠️  Bootstrap key : {msg}")
-            logger.warning("⚠️  Le service démarre mais le chiffrement des clés unseal échouera.")
-        else:
-            logger.info("✅ Bootstrap key validée (entropie suffisante)")
+            logger.warning(f"⚠️  Bootstrap key : {msg} (le chiffrement des clés unseal échouera)")
     except Exception as e:
         logger.warning(f"⚠️ Validation bootstrap key : {e}")
 
