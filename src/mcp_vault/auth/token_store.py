@@ -84,6 +84,16 @@ class TokenStore:
             data = json.loads(resp["Body"].read().decode())
             self._tokens = {t["hash"]: t for t in data.get("tokens", [])}
             self._cache_time = time.time()
+            # Migration : nettoie les valeurs "_remove" stockées par erreur
+            # (bug SPA < v0.4.11 : l'admin /admin envoyait le sentinel MCP tel quel).
+            dirty = False
+            for token in self._tokens.values():
+                if token.get("policy_id") == "_remove":
+                    token["policy_id"] = ""
+                    dirty = True
+            if dirty:
+                self._save()
+                print("ℹ️  Token Store : migration policy_id '_remove' → '' effectuée.", file=sys.stderr)
         except Exception as e:
             if "NoSuchKey" in str(e) or "404" in str(e):
                 self._tokens = {}
@@ -205,7 +215,8 @@ class TokenStore:
         updated_fields = []
 
         if policy_id is not None:
-            token["policy_id"] = policy_id
+            # Convertit le sentinel "_remove" en "" pour compatibilité avec l'outil MCP
+            token["policy_id"] = "" if policy_id == "_remove" else policy_id
             updated_fields.append("policy_id")
 
         if permissions is not None:

@@ -1,5 +1,27 @@
 # Changelog — MCP Vault
 
+## [0.4.11] — 2026-06-07
+
+### Fix — Sentinel `_remove` stocké littéralement dans la policy des tokens (/admin)
+
+**Bug** : dans l'interface `/admin`, modifier ou retirer la policy d'un token stockait la chaîne `_remove` comme valeur de `policy_id` au lieu de `""`. La policy enforcement cherchait alors une policy nommée `_remove` (inexistante) et bloquait tous les accès du token (fail-close).
+
+**Cause** : `doUpdateToken()` dans `tokens.js` envoyait le sentinel MCP `_remove` à l'API REST `/admin/api/tokens/{hash}`, qui ne le gère pas (contrairement à l'outil MCP `token_update`).
+
+**Deuxième bug** : ouvrir le modal d'édition pour un token sans policy affichait la policy sélectionnée lors du précédent appel (le `select` n'était réinitialisé à `""` que si `policyId` était truthy).
+
+**Correctifs** :
+- `tokens.js` — `doUpdateToken()` : envoie `policy_id: ""` au lieu de `"_remove"` pour retirer la policy.
+- `tokens.js` — `openEditToken()` : le `select` est toujours réinitialisé à la valeur du token courant (`""` si aucune policy), même si `policyId` est vide.
+- `token_store.py` — `update()` : le sentinel `_remove` est converti en `""` (robustesse vis-à-vis de l'outil MCP).
+- `token_store.py` — `load()` : migration auto des valeurs `"_remove"` stockées → `""` au prochain rechargement du Token Store.
+- `admin.html` : tooltip corrigé (suppression de la mention de `_remove` qui ne s'applique qu'à la CLI MCP).
+
+### Fichiers modifiés
+- `src/mcp_vault/static/js/tokens.js`
+- `src/mcp_vault/auth/token_store.py`
+- `src/mcp_vault/static/admin.html`
+
 ## [0.4.10] — 2026-06-07
 
 ### Fix — `/mcp` renvoie HTTP 421 « Invalid Host header » sur le FQDN public (issue #3)

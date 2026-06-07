@@ -152,26 +152,29 @@ async function openEditToken(hashPrefix, permissions, vaults, policyId) {
     document.getElementById('etPermAdmin').checked = permissions.includes('admin');
     document.getElementById('etVaults').value = vaults || '';
 
-    // Charger les policies disponibles puis sélectionner la bonne
+    // Charger les policies disponibles
     if (isAdmin()) {
         await loadPolicyOptions('etPolicy');
     }
 
-    // Ajouter l'option "_remove" pour retirer la policy
+    // Sélectionner la policy du token — TOUJOURS remettre la valeur (même "" pour "aucune"),
+    // sinon le select conserve la valeur du modal précédent.
     const etPolicySelect = document.getElementById('etPolicy');
-    if (etPolicySelect && policyId) {
-        // S'assurer que la valeur actuelle est bien dans la liste
-        let found = false;
-        for (const opt of etPolicySelect.options) {
-            if (opt.value === policyId) { found = true; break; }
+    if (etPolicySelect) {
+        if (policyId) {
+            // S'assurer que la policy actuelle est bien dans la liste (cas rare)
+            let found = false;
+            for (const opt of etPolicySelect.options) {
+                if (opt.value === policyId) { found = true; break; }
+            }
+            if (!found) {
+                const opt = document.createElement('option');
+                opt.value = policyId;
+                opt.textContent = policyId + ' (actuelle)';
+                etPolicySelect.appendChild(opt);
+            }
         }
-        if (!found && policyId) {
-            const opt = document.createElement('option');
-            opt.value = policyId;
-            opt.textContent = policyId + ' (actuelle)';
-            etPolicySelect.appendChild(opt);
-        }
-        etPolicySelect.value = policyId;
+        etPolicySelect.value = policyId || '';  // "" = "— Aucune policy —"
     }
 
     openModal('modalEditToken');
@@ -193,13 +196,10 @@ async function doUpdateToken() {
         allowed_resources: vList,
     };
 
-    // Si policy sélectionnée, l'envoyer. Si vide et qu'il y en avait une, envoyer "_remove"
-    if (policyId) {
-        body.policy_id = policyId;
-    } else {
-        // Vide = retirer la policy (envoyer _remove)
-        body.policy_id = '_remove';
-    }
+    // Toujours envoyer policy_id : "" = retirer la policy, valeur = assigner.
+    // Ne jamais envoyer "_remove" — le backend admin API ne le comprend pas
+    // (le sentinel _remove n'est géré que par l'outil MCP token_update).
+    body.policy_id = policyId;
 
     const data = await api(`/tokens/${hashPrefix}`, {
         method: 'PUT',
