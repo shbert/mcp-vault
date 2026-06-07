@@ -301,11 +301,15 @@ def test_aad_context_binding():
     original_aad = crypto_mod._AAD
     try:
         crypto_mod._AAD = b"wrong-context-different"
+        # Ne jamais mettre assert dans un try/except (AssertionError ⊂ Exception serait avalé).
+        # Pattern correct : flag + assert HORS du bloc except.
+        decryption_failed = False
         try:
             decrypt_with_bootstrap_key(encrypted, _TEST_KEY)
-            assert False, "Déchiffrement avec un AAD différent aurait dû échouer"
-        except (ValueError, Exception):
-            pass  # Attendu : InvalidTag ou ValueError
+        except ValueError:
+            decryption_failed = True
+        assert decryption_failed, \
+            "Déchiffrement avec un AAD différent aurait dû lever ValueError"
     finally:
         crypto_mod._AAD = original_aad  # Restaurer l'AAD de production
 

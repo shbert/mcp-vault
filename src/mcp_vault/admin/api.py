@@ -350,6 +350,9 @@ async def _api_create_token(send, body):
     result = store.create(client_name, permissions, allowed_resources,
                           expires_in_days=expires_in_days, email=email,
                           policy_id=policy_id)
+    if result.get("status") == "error":
+        status_code = 503 if result.get("error_type") == "storage_unavailable" else 400
+        return await _json_response(send, status_code, result)
     await _json_response(send, 201, {"status": "created", **result})
 
 
@@ -379,6 +382,8 @@ async def _api_update_token(send, hash_prefix, body):
         permissions=permissions,
         allowed_resources=allowed_resources,
     )
+    if result.get("error_type") == "storage_unavailable":
+        return await _json_response(send, 503, result)
     status_code = 200 if result.get("status") == "updated" else 400
     await _json_response(send, status_code, result)
 
@@ -389,10 +394,15 @@ async def _api_revoke_token(send, hash_prefix):
     if not store:
         return await _json_response(send, 400, {"status": "error", "message": "S3 non configuré"})
 
-    if store.revoke(hash_prefix):
-        await _json_response(send, 200, {"status": "ok", "message": f"Token {hash_prefix}... révoqué"})
+    result = store.revoke(hash_prefix)
+    status = result.get("status")
+    if status == "ok":
+        await _json_response(send, 200, result)
+    elif status == "storage_unavailable":
+        await _json_response(send, 503, {"status": "error", **result})
     else:
-        await _json_response(send, 404, {"status": "error", "message": f"Token {hash_prefix}... non trouvé"})
+        # not_found | ambiguous | invalid_prefix
+        await _json_response(send, 404, {"status": "error", **result})
 
 
 async def _api_create_vault(send, body):

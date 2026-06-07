@@ -92,8 +92,8 @@ def test_admin_api_list_secrets_blocked_by_path_policy():
         )
 
     assert status == 403, f"Attendu 403 (bloqué par path policy), obtenu {status}: {body}"
-    mock_cpp.assert_called_once()
-    print("  ✅ list_secrets bloqué par check_path_policy")
+    mock_cpp.assert_called_once_with("test-vault", "", "read")
+    print("  ✅ list_secrets bloqué par check_path_policy(vault_id, '', 'read')")
 
 
 def test_admin_api_read_secret_blocked_by_path_policy():
@@ -115,8 +115,8 @@ def test_admin_api_read_secret_blocked_by_path_policy():
         )
 
     assert status == 403, f"Attendu 403, obtenu {status}: {body}"
-    mock_cpp.assert_called_once()
-    print("  ✅ read_secret bloqué par check_path_policy")
+    mock_cpp.assert_called_once_with("test-vault", "secret/key", "read")
+    print("  ✅ read_secret bloqué par check_path_policy(vault_id, path, 'read')")
 
 
 def test_admin_api_write_secret_blocked_by_path_policy():
@@ -139,8 +139,8 @@ def test_admin_api_write_secret_blocked_by_path_policy():
         )
 
     assert status == 403, f"Attendu 403, obtenu {status}: {resp}"
-    mock_cpp.assert_called_once()
-    print("  ✅ write_secret bloqué par check_path_policy")
+    mock_cpp.assert_called_once_with("test-vault", "db/prod", "write")
+    print("  ✅ write_secret bloqué par check_path_policy(vault_id, path, 'write')")
 
 
 def test_admin_api_delete_secret_blocked_by_path_policy():
@@ -162,8 +162,8 @@ def test_admin_api_delete_secret_blocked_by_path_policy():
         )
 
     assert status == 403, f"Attendu 403, obtenu {status}: {resp}"
-    mock_cpp.assert_called_once()
-    print("  ✅ delete_secret bloqué par check_path_policy")
+    mock_cpp.assert_called_once_with("test-vault", "db/prod", "write")
+    print("  ✅ delete_secret bloqué par check_path_policy(vault_id, path, 'write')")
 
 
 if __name__ == "__main__":

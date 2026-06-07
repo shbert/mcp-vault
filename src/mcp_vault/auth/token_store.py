@@ -200,31 +200,37 @@ class TokenStore:
         ]
 
     @staticmethod
+    def _normalize_hash_prefix(hash_prefix: str) -> str:
+        """Normalise un hash_prefix : strip whitespace + lowercase (SHA-256 = hex lowercase)."""
+        return hash_prefix.strip().lower() if hash_prefix else ""
+
+    @staticmethod
     def _validate_hash_prefix(hash_prefix: str) -> Optional[str]:
         """
         Valide un préfixe de hash token pour les opérations update/revoke.
         Retourne None si OK, message d'erreur si invalide.
 
         - Minimum 12 chars (list_all expose 12 chars — en dessous, ambiguïté garantie)
-        - Hexadécimal uniquement
+        - Hexadécimal uniquement (lowercase après normalisation)
         - Non vide
         """
-        if not hash_prefix or not hash_prefix.strip():
+        hp = TokenStore._normalize_hash_prefix(hash_prefix)
+        if not hp:
             return "hash_prefix requis"
-        hp = hash_prefix.strip()
         if len(hp) < 12:
             return f"hash_prefix trop court ({len(hp)} chars, minimum 12)"
-        if not all(c in "0123456789abcdef" for c in hp.lower()):
+        if not all(c in "0123456789abcdef" for c in hp):
             return "hash_prefix invalide (hexadécimal uniquement)"
         return None
 
     def _resolve_hash(self, hash_prefix: str) -> Optional[str]:
         """
-        Résout un préfixe de hash en hash complet.
-        Retourne None si aucun match ou ambiguïté.
+        Résout un préfixe de hash normalisé en hash complet.
+        Retourne None si aucun match.
         Lève ValueError si ambiguïté (plusieurs tokens matchent).
         """
-        matches = [h for h in self._tokens if h.startswith(hash_prefix)]
+        hp = self._normalize_hash_prefix(hash_prefix)
+        matches = [h for h in self._tokens if h.startswith(hp)]
         if len(matches) == 0:
             return None
         if len(matches) > 1:
@@ -259,6 +265,10 @@ class TokenStore:
 
         updated_fields = []
 
+        # Snapshot AVANT toute mutation pour un rollback correct si _save échoue
+        import copy
+        snapshot = copy.deepcopy(dict(token))
+
         if policy_id is not None:
             # Convertit le sentinel "_remove" en "" pour compatibilité avec l'outil MCP
             token["policy_id"] = "" if policy_id == "_remove" else policy_id
@@ -278,10 +288,9 @@ class TokenStore:
         if not updated_fields:
             return {"status": "error", "message": "Aucun champ à modifier"}
 
-        # Snapshot pour rollback si _save échoue
-        snapshot = {k: v for k, v in token.items()}
         if not self._save():
-            self._tokens[target_hash].update(snapshot)  # rollback mémoire
+            self._tokens[target_hash].clear()
+            self._tokens[target_hash].update(snapshot)  # rollback vers l'état pré-mutation
             return {"status": "error", "error_type": "storage_unavailable",
                     "message": "Modification non persistée (S3 indisponible)"}
 
@@ -295,19 +304,25 @@ class TokenStore:
             "allowed_resources": token.get("allowed_resources", []),
         }
 
-    def revoke(self, hash_prefix: str) -> bool:
-        """Révoque un token par préfixe de hash (minimum 12 chars, hexadécimal)."""
+    def revoke(self, hash_prefix: str) -> dict:
+        """
+        Révoque un token par préfixe de hash (minimum 12 chars, hexadécimal).
+
+        Retourne un dict avec status : "ok" | "not_found" | "invalid_prefix"
+                                      | "ambiguous" | "storage_unavailable"
+        Distingue les différentes causes d'échec pour une propagation HTTP correcte.
+        """
         from datetime import datetime, timezone
         err = self._validate_hash_prefix(hash_prefix)
         if err:
-            return False
+            return {"status": "invalid_prefix", "message": err}
         self._maybe_refresh()
         try:
             target_hash = self._resolve_hash(hash_prefix)
-        except ValueError:
-            return False  # Ambigu → refus silencieux (opération admin)
+        except ValueError as e:
+            return {"status": "ambiguous", "message": str(e)}
         if not target_hash:
-            return False
+            return {"status": "not_found", "message": f"Token {hash_prefix}... non trouvé"}
         t = self._tokens[target_hash]
         old_revoked = t.get("revoked", False)
         old_revoked_at = t.get("revoked_at")
@@ -321,8 +336,9 @@ class TokenStore:
             else:
                 t.pop("revoked_at", None)
             logger.error("Révocation du token %s... non persistée — S3 indisponible", hash_prefix[:12])
-            return False
-        return True
+            return {"status": "storage_unavailable",
+                    "message": f"Révocation non persistée — S3 indisponible (token {hash_prefix[:12]}...)"}
+        return {"status": "ok", "message": f"Token {hash_prefix[:12]}... révoqué"}
 
     @staticmethod
     def _is_expired(token: dict) -> bool:
