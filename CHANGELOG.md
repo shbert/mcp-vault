@@ -1,5 +1,36 @@
 # Changelog — MCP Vault
 
+## [0.4.10] — 2026-06-07
+
+### Fix — `/mcp` renvoie HTTP 421 « Invalid Host header » sur le FQDN public (issue #3)
+
+**Bug bloquant** : aucun client MCP (Claude Code, Codex, …) ne pouvait se connecter via `https://vault.mcp.cloud-temple.app/mcp` — l'endpoint répondait `HTTP 421 Invalid Host header` **avant** la couche d'authentification.
+
+**Cause racine** : `FastMCP()` était instancié sans paramètre `host`. Le SDK MCP (≥1.x) auto-active alors la protection anti-DNS-rebinding avec pour seuls hosts autorisés le loopback (`127.0.0.1`, `localhost`, `[::1]`). Tout `Host` correspondant au FQDN public était donc rejeté par le `TransportSecurityMiddleware`.
+
+**Correctif** :
+- `_build_transport_security()` (`server.py`) construit explicitement les `TransportSecuritySettings` : protection **maintenue active**, loopback **toujours** autorisé (health checks, tests e2e via WAF localhost) + FQDN publics issus de la config.
+- Nouveaux réglages `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` (`config.py`), défaut = `vault.mcp.cloud-temple.app,my.vault.mcp.cloud-temple.app`, surchargeables par variable d'environnement (liste CSV).
+- Normalisation des FQDN en minuscules (DNS insensible à la casse) + déduplication ; dérivation automatique de l'origin `https://<fqdn>` et de la variante avec port (`<fqdn>:*`).
+
+### Security — Durcissements complémentaires
+- **Fail-fast `ADMIN_BOOTSTRAP_KEY`** (`server.py`) : le service refuse désormais de démarrer si la bootstrap key est vide / par défaut / faible (auparavant simple warning). Cette clé chiffre les clés unseal et sert de credential admin de secours.
+- **`Settings` strict** (`config.py`) : champ `waf_port` déclaré explicitement (variable partagée avec docker-compose) ; `extra="forbid"` conservé → toute variable inconnue (typo de config) lève une erreur explicite au lieu d'être silencieusement ignorée.
+
+### Tests
+- `tests/test_transport_security.py` — 11 tests (FQDN acceptés, loopback, casse, dédup, IPv6 `[::1]`, host inconnu rejeté, protection active, override env).
+
+### Fichiers modifiés
+- `src/mcp_vault/server.py` — `_build_transport_security()` + `FastMCP(transport_security=…)` + fail-fast bootstrap key
+- `src/mcp_vault/config.py` — `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` / `waf_port`, normalisation CSV
+- `src/mcp_vault/lifecycle.py` — validation bootstrap key en défense en profondeur
+- `.env.example` — documentation des nouvelles variables
+- `tests/test_transport_security.py` — nouveau
+
+### Validation
+- Revue de code complète (codex, 2 passes) → APPROUVÉ.
+- 11/11 transport_security + 18/18 crypto.
+
 ## [0.4.9] — 2026-04-25
 
 ### Security — Enforcement `path_rules` sur l'API REST admin (PR #2)

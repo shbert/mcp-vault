@@ -66,9 +66,54 @@ def _r(tool: str, result: dict, vault_id: str = "", detail: str = "") -> dict:
     return result
 
 # --- FastMCP instance ---
+def _build_transport_security(cfg=None):
+    """
+    Construit les réglages anti-DNS-rebinding du SDK MCP pour le transport
+    streamable-http.
+
+    Sans ce réglage explicite, FastMCP auto-active la protection avec pour seul
+    `host` le loopback (défaut interne 127.0.0.1), ce qui rejette toute requête
+    portant le FQDN public en HTTP 421 « Invalid Host header » (cf. issue #3).
+
+    Le loopback reste TOUJOURS autorisé (health checks internes, tests e2e via le
+    WAF localhost). Les FQDN publics proviennent de la config (MCP_ALLOWED_HOSTS) ;
+    pour chacun on autorise aussi la variante avec port (`fqdn:*`) et on dérive
+    systématiquement l'origin `https://fqdn`. MCP_ALLOWED_ORIGINS ajoute d'éventuelles
+    origins supplémentaires (sans remplacer les origins dérivées).
+
+    NB : le matcher du SDK ne gère le wildcard que sur le port (`base:*`), pas sur
+    les sous-domaines — chaque FQDN doit donc être listé explicitement. Les FQDN sont
+    normalisés en minuscules (DNS insensible à la casse, matcher SDK sensible) ; les
+    doublons sont éliminés en conservant l'ordre.
+
+    Args:
+        cfg: Settings à utiliser (défaut : la config globale du module). Paramétrable
+             pour faciliter les tests unitaires.
+    """
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    cfg = cfg or settings
+
+    hosts = ["localhost", "127.0.0.1", "localhost:*", "127.0.0.1:*", "[::1]", "[::1]:*"]
+    origins = ["http://localhost:*", "http://127.0.0.1:*", "http://[::1]:*"]
+
+    for fqdn in cfg.allowed_hosts_list:
+        hosts.extend([fqdn, f"{fqdn}:*"])
+        origins.append(f"https://{fqdn}")
+
+    origins.extend(cfg.allowed_origins_list)
+
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=list(dict.fromkeys(hosts)),
+        allowed_origins=list(dict.fromkeys(origins)),
+    )
+
+
 mcp = FastMCP(
     settings.mcp_server_name,
     instructions="MCP Vault — Gestion sécurisée des secrets pour agents IA (OpenBao embedded)",
+    transport_security=_build_transport_security(),
 )
 
 
@@ -847,6 +892,22 @@ def main():
     logger.info(f"  🏛️  OpenBao: {settings.openbao_addr}")
     logger.info(f"  ☁️  S3: {settings.s3_bucket_name or '(non configuré)'}")
     logger.info("=" * 60)
+
+    # ── Fail-fast sécurité : refuser de démarrer avec une bootstrap key invalide ──
+    # ADMIN_BOOTSTRAP_KEY chiffre les clés unseal (AES-256-GCM) et sert de credential
+    # admin de secours. Une clé vide/par défaut/faible compromet tout le service — on
+    # refuse donc de démarrer plutôt que de tourner avec un chiffrement cassé.
+    from .openbao.crypto import validate_bootstrap_key
+    is_valid, msg = validate_bootstrap_key(settings.admin_bootstrap_key)
+    if not is_valid:
+        logger.error(f"❌ ADMIN_BOOTSTRAP_KEY invalide : {msg}")
+        logger.error(
+            "   Démarrage refusé (fail-fast sécurité). Définissez une clé forte via la "
+            "variable d'environnement ADMIN_BOOTSTRAP_KEY "
+            "(ex: python -c \"import secrets; print(secrets.token_urlsafe(48))\")."
+        )
+        sys.exit(1)
+    logger.info("✅ ADMIN_BOOTSTRAP_KEY validée (entropie suffisante)")
 
     app = create_app()
 
