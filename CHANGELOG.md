@@ -1,5 +1,36 @@
 # Changelog — MCP Vault
 
+## [0.4.15] — 2026-06-07
+
+### Security & Tests — Audit complet non-complaisance + résiduels auth
+
+#### Sécurité auth — 3 correctifs
+
+**hash_prefix non validé** (`token_store.py`) : `update()` et `revoke()` acceptaient un préfixe vide ou d'un seul caractère, matchant le premier token de la liste. Ajout de `_validate_hash_prefix()` (minimum 12 chars, hexadécimal, non ambigu) et `_resolve_hash()` (erreur si 0 ou plusieurs matchs). `revoke()` appelait maintenant `_maybe_refresh()`.
+
+**`TokenStore._save()` silencieux** : les exceptions S3 étaient avalées → `create/update/revoke` annonçaient succès sans persistance. `_save()` retourne maintenant `bool`, les appelants font un rollback mémoire et retournent une erreur HTTP 503-like si S3 indisponible. Une révocation non persistée est une faille critique.
+
+**Tokens expirés affichés "actifs"** : `get_by_hash()` rejetait déjà les tokens expirés, mais `list_all()` et `count()` ne calculaient pas l'expiration. Ajout du helper `_is_expired(token)`, utilisé par `get_by_hash`, `list_all` (nouveau champ `expired: bool`) et `count` (exclut les expirés). Affichage "EXPIRÉ" en SPA (badge jaune) et CLI.
+
+#### Tests — Correction du défaut structurel CLI et réécriture des tests complaisant
+
+**Défaut structurel CLI (HAUT)** : `tests/cli/__init__.py` — `check()` ne levait jamais d'exception → pytest considérait tous les tests CLI comme réussis. Fix : `tests/cli/conftest.py` avec fixture `@pytest.fixture(autouse=True)` qui reset les compteurs avant et assert `FAIL == 0` après chaque test.
+
+**`tests/test_admin_path_policy.py`** : réécriture complète. Les 3 tests (recherches textuelles dans le source) remplacés par 4 tests comportementaux ASGI qui appellent réellement `handle_admin_api()` et vérifient que `check_path_policy` est appelé et bloque avec HTTP 403.
+
+**`tests/test_openbao_manager.py`** : réécriture complète. Les 2 tests (recherches textuelles) remplacés par des tests comportementaux : `start_openbao()` ne lance pas `Popen` si OpenBao est reachable, et redirige bien stdout/stderr vers des fichiers (pas `subprocess.PIPE`).
+
+**`tests/test_crypto.py` — `test_aad_context_binding`** : réécrit pour passer par les fonctions publiques `encrypt/decrypt_with_bootstrap_key()`. L'ancienne version testait `AESGCM` directement et aurait passé même si `_AAD` était retiré de la production.
+
+### Fichiers modifiés
+- `src/mcp_vault/auth/token_store.py` — hash_prefix validation, _save fail-closed, _is_expired
+- `scripts/cli/display.py` — affichage EXPIRÉ
+- `src/mcp_vault/static/js/tokens.js` — badge "expiré" (jaune)
+- `tests/cli/conftest.py` — NOUVEAU : fixture autouse CLI
+- `tests/test_admin_path_policy.py` — réécriture comportementale
+- `tests/test_openbao_manager.py` — réécriture comportementale
+- `tests/test_crypto.py` — test_aad_context_binding non-complaisant
+
 ## [0.4.14] — 2026-06-07
 
 ### Security — Correctifs auth CRITIQUE + ÉLEVÉ (audit codex)

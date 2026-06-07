@@ -568,6 +568,9 @@ def show_token_result(result: dict):
                     revoked_at = t.get("revoked_at", "")
                     revoked_str = revoked_at[:10] if revoked_at else ""
                     status_str = f"[red]RÉVOQUÉ[/red]" + (f" {revoked_str}" if revoked_str else "")
+                elif t.get("expired"):
+                    exp = t.get("expires_at", "")[:10]
+                    status_str = f"[yellow]EXPIRÉ[/yellow] {exp}"
                 else:
                     exp = t.get("expires_at") or "jamais"
                     if exp != "jamais":

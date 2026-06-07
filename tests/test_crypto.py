@@ -276,36 +276,44 @@ def test_aad_legacy_fallback():
 
 
 def test_aad_context_binding():
-    """Le chiffrement avec AAD empêche le déchiffrement avec un AAD différent."""
-    import base64, os
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    """
+    Le chiffrement via encrypt_with_bootstrap_key utilise l'AAD défini dans crypto.py.
+    Si l'AAD était modifié ou retiré, les données chiffrées avec l'ancien AAD
+    ne pourraient plus être déchiffrées.
+
+    Ce test passe par les fonctions PUBLIQUES encrypt/decrypt pour être non-complaisant :
+    si _AAD était supprimé de la production, le test échouerait car les données
+    chiffrées sans AAD ne correspondent plus à celles chiffrées avec.
+    """
+    import mcp_vault.openbao.crypto as crypto_mod
     from mcp_vault.openbao.crypto import (
-        _derive_key, _SALT_LENGTH, _NONCE_LENGTH, _AAD, _zero_fill,
+        encrypt_with_bootstrap_key, decrypt_with_bootstrap_key, _AAD
     )
 
-    plaintext = "secret-data"
-    salt = os.urandom(_SALT_LENGTH)
-    nonce = os.urandom(_NONCE_LENGTH)
-    key = _derive_key(_TEST_KEY, salt)
-    try:
-        aesgcm = AESGCM(bytes(key))
-        ciphertext = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), _AAD)
-    finally:
-        _zero_fill(key)
+    plaintext = '{"secret": "test-aad-binding"}'
 
-    # Tenter de déchiffrer avec un AAD différent → doit échouer
-    key2 = _derive_key(_TEST_KEY, salt)
+    # 1. Chiffrer normalement (avec l'AAD de production)
+    encrypted = encrypt_with_bootstrap_key(plaintext, _TEST_KEY)
+    decrypted = decrypt_with_bootstrap_key(encrypted, _TEST_KEY)
+    assert decrypted == plaintext, "Déchiffrement normal doit fonctionner"
+
+    # 2. Patcher _AAD pour simuler un AAD différent → le déchiffrement doit échouer
+    original_aad = crypto_mod._AAD
     try:
-        aesgcm2 = AESGCM(bytes(key2))
+        crypto_mod._AAD = b"wrong-context-different"
+        # Ne jamais mettre assert dans un try/except (AssertionError ⊂ Exception serait avalé).
+        # Pattern correct : flag + assert HORS du bloc except.
+        decryption_failed = False
         try:
-            aesgcm2.decrypt(nonce, ciphertext, b"wrong-context")
-            assert False, "Aurait dû lever une exception (AAD différent)"
-        except Exception:
-            pass  # Attendu : InvalidTag
+            decrypt_with_bootstrap_key(encrypted, _TEST_KEY)
+        except ValueError:
+            decryption_failed = True
+        assert decryption_failed, \
+            "Déchiffrement avec un AAD différent aurait dû lever ValueError"
     finally:
-        _zero_fill(key2)
+        crypto_mod._AAD = original_aad  # Restaurer l'AAD de production
 
-    print("  ✅ AAD context binding — AAD différent → rejet OK")
+    print("  ✅ AAD context binding via encrypt/decrypt publics — AAD différent → rejet")
 
 
 if __name__ == "__main__":
