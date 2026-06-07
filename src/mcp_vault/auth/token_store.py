@@ -11,11 +11,14 @@ Pattern :
     get_token_store()      → Getter singleton (retourne None si pas configuré)
 """
 
+import logging
 import sys
 import time
 import json
 import hashlib
 from typing import Optional
+
+logger = logging.getLogger("mcp-vault.token-store")
 
 from ..config import get_settings
 
@@ -101,8 +104,14 @@ class TokenStore:
             else:
                 print(f"⚠️  Token Store S3 : {e}", file=sys.stderr)
 
-    def _save(self):
-        """Sauvegarde les tokens sur S3 (PUT = SigV2)."""
+    def _save(self) -> bool:
+        """
+        Sauvegarde les tokens sur S3 (PUT = SigV2).
+
+        Retourne True si succès, False si S3 indisponible.
+        Les appelants doivent rollback l'état mémoire si False est retourné
+        (révocation perdue = faille sécurité critique).
+        """
         try:
             s3 = self._get_s3_data()
             data = json.dumps(
@@ -115,8 +124,10 @@ class TokenStore:
                 Body=data.encode(),
                 ContentType="application/json",
             )
+            return True
         except Exception as e:
-            print(f"⚠️  Token Store S3 save : {e}", file=sys.stderr)
+            logger.error("Token Store S3 save FAILED: %s — état mémoire non persisté", type(e).__name__)
+            return False
 
     def _maybe_refresh(self):
         """Rafraîchit le cache si le TTL est dépassé."""
@@ -127,15 +138,11 @@ class TokenStore:
         """Cherche un token par son hash SHA-256. Vérifie l'expiration."""
         self._maybe_refresh()
         token = self._tokens.get(token_hash)
-        if token and token.get("expires_at"):
-            from datetime import datetime, timezone
-            try:
-                expires = datetime.fromisoformat(token["expires_at"])
-                if datetime.now(timezone.utc) > expires:
-                    return None  # Token expiré
-            except (ValueError, TypeError):
-                # SÉCURITÉ V2-17 : fail-close — expires_at corrompu = token invalide
-                return None
+        if token is None:
+            return None
+        # SÉCURITÉ V2-17 : fail-close — expires_at corrompu ou expiré = token invalide
+        if self._is_expired(token):
+            return None
         return token
 
     def create(self, client_name: str, permissions: list, allowed_resources: list = None,
@@ -165,12 +172,15 @@ class TokenStore:
         }
 
         self._tokens[token_hash] = token_info
-        self._save()
+        if not self._save():
+            del self._tokens[token_hash]  # rollback mémoire
+            return {"status": "error", "error_type": "storage_unavailable",
+                    "message": "Impossible de créer le token (S3 indisponible)"}
 
         return {"raw_token": raw_token, **token_info}
 
     def list_all(self) -> list:
-        """Liste tous les tokens (sans les hash complets)."""
+        """Liste tous les tokens (sans les hash complets) avec champ 'expired'."""
         self._maybe_refresh()
         return [
             {
@@ -184,9 +194,42 @@ class TokenStore:
                 "expires_at": t.get("expires_at"),
                 "revoked": t.get("revoked", False),
                 "revoked_at": t.get("revoked_at", ""),
+                "expired": self._is_expired(t),
             }
             for t in self._tokens.values()
         ]
+
+    @staticmethod
+    def _validate_hash_prefix(hash_prefix: str) -> Optional[str]:
+        """
+        Valide un préfixe de hash token pour les opérations update/revoke.
+        Retourne None si OK, message d'erreur si invalide.
+
+        - Minimum 12 chars (list_all expose 12 chars — en dessous, ambiguïté garantie)
+        - Hexadécimal uniquement
+        - Non vide
+        """
+        if not hash_prefix or not hash_prefix.strip():
+            return "hash_prefix requis"
+        hp = hash_prefix.strip()
+        if len(hp) < 12:
+            return f"hash_prefix trop court ({len(hp)} chars, minimum 12)"
+        if not all(c in "0123456789abcdef" for c in hp.lower()):
+            return "hash_prefix invalide (hexadécimal uniquement)"
+        return None
+
+    def _resolve_hash(self, hash_prefix: str) -> Optional[str]:
+        """
+        Résout un préfixe de hash en hash complet.
+        Retourne None si aucun match ou ambiguïté.
+        Lève ValueError si ambiguïté (plusieurs tokens matchent).
+        """
+        matches = [h for h in self._tokens if h.startswith(hash_prefix)]
+        if len(matches) == 0:
+            return None
+        if len(matches) > 1:
+            raise ValueError(f"hash_prefix '{hash_prefix}' ambigu : {len(matches)} tokens matchent")
+        return matches[0]
 
     def update(self, hash_prefix: str, policy_id: str = None,
                permissions: list = None, allowed_resources: list = None) -> dict:
@@ -196,14 +239,16 @@ class TokenStore:
         Seuls les champs fournis (non-None) sont modifiés.
         Retourne le token mis à jour ou une erreur.
         """
+        err = self._validate_hash_prefix(hash_prefix)
+        if err:
+            return {"status": "error", "message": err}
+
         self._maybe_refresh()
 
-        # Trouver le token par préfixe de hash
-        target_hash = None
-        for h in self._tokens:
-            if h.startswith(hash_prefix):
-                target_hash = h
-                break
+        try:
+            target_hash = self._resolve_hash(hash_prefix)
+        except ValueError as e:
+            return {"status": "error", "message": str(e)}
 
         if not target_hash:
             return {"status": "error", "message": f"Token {hash_prefix}... non trouvé"}
@@ -233,7 +278,12 @@ class TokenStore:
         if not updated_fields:
             return {"status": "error", "message": "Aucun champ à modifier"}
 
-        self._save()
+        # Snapshot pour rollback si _save échoue
+        snapshot = {k: v for k, v in token.items()}
+        if not self._save():
+            self._tokens[target_hash].update(snapshot)  # rollback mémoire
+            return {"status": "error", "error_type": "storage_unavailable",
+                    "message": "Modification non persistée (S3 indisponible)"}
 
         return {
             "status": "updated",
@@ -246,16 +296,49 @@ class TokenStore:
         }
 
     def revoke(self, hash_prefix: str) -> bool:
-        """Révoque un token par préfixe de hash."""
+        """Révoque un token par préfixe de hash (minimum 12 chars, hexadécimal)."""
         from datetime import datetime, timezone
-        for h, t in self._tokens.items():
-            if h.startswith(hash_prefix):
-                t["revoked"] = True
-                t["revoked_at"] = datetime.now(timezone.utc).isoformat()
-                self._save()
-                return True
-        return False
+        err = self._validate_hash_prefix(hash_prefix)
+        if err:
+            return False
+        self._maybe_refresh()
+        try:
+            target_hash = self._resolve_hash(hash_prefix)
+        except ValueError:
+            return False  # Ambigu → refus silencieux (opération admin)
+        if not target_hash:
+            return False
+        t = self._tokens[target_hash]
+        old_revoked = t.get("revoked", False)
+        old_revoked_at = t.get("revoked_at")
+        t["revoked"] = True
+        t["revoked_at"] = datetime.now(timezone.utc).isoformat()
+        if not self._save():
+            # Rollback : une révocation non persistée est CRITIQUE
+            t["revoked"] = old_revoked
+            if old_revoked_at:
+                t["revoked_at"] = old_revoked_at
+            else:
+                t.pop("revoked_at", None)
+            logger.error("Révocation du token %s... non persistée — S3 indisponible", hash_prefix[:12])
+            return False
+        return True
+
+    @staticmethod
+    def _is_expired(token: dict) -> bool:
+        """Vérifie si un token est expiré (cohérent avec get_by_hash)."""
+        expires_at = token.get("expires_at")
+        if not expires_at:
+            return False
+        from datetime import datetime, timezone
+        try:
+            return datetime.now(timezone.utc) > datetime.fromisoformat(expires_at)
+        except (ValueError, TypeError):
+            return True  # fail-close : date corrompue = expiré
 
     def count(self) -> int:
-        """Nombre de tokens actifs."""
-        return sum(1 for t in self._tokens.values() if not t.get("revoked", False))
+        """Nombre de tokens actifs (non révoqués et non expirés)."""
+        return sum(
+            1 for t in self._tokens.values()
+            if not t.get("revoked", False) and not self._is_expired(t)
+        )

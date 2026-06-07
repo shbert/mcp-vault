@@ -34,6 +34,9 @@ async function loadTokens() {
             if (t.revoked) {
                 const revokedAt = t.revoked_at ? new Date(t.revoked_at).toLocaleDateString('fr-FR', {day:'2-digit',month:'2-digit',year:'numeric'}) : '';
                 statusHtml = `<span class="badge badge-err">révoqué</span>${revokedAt ? `<br><span style="color:var(--muted);font-size:0.68rem">${revokedAt}</span>` : ''}`;
+            } else if (t.expired) {
+                const expiresAt = t.expires_at ? new Date(t.expires_at).toLocaleDateString('fr-FR', {day:'2-digit',month:'2-digit',year:'numeric'}) : '';
+                statusHtml = `<span class="badge badge-warn" title="Token expiré — connexions refusées">expiré</span>${expiresAt ? `<br><span style="color:var(--muted);font-size:0.68rem">${expiresAt}</span>` : ''}`;
             } else {
                 statusHtml = '<span class="badge badge-ok">actif</span>';
             }
