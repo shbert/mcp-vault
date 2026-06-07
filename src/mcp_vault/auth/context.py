@@ -164,16 +164,19 @@ def check_policy(tool_name: str) -> Optional[dict]:
     }
 
 
-def check_path_policy(vault_id: str, path: str) -> Optional[dict]:
+def check_path_policy(vault_id: str, path: str,
+                       required_permission: str = "read") -> Optional[dict]:
     """
     Vérifie que le token courant a le droit d'accéder à ce chemin de secret.
 
-    Utilise les path_rules de la policy assignée au token.
-    Si la policy a des allowed_paths pour ce vault, le path doit matcher.
+    Utilise les path_rules de la policy assignée au token. Vérifie à la fois :
+    - que l'opération est permise par la règle (required_permission)
+    - que le chemin est dans les allowed_paths de la règle
 
     Args:
         vault_id: ID du vault
         path: Chemin du secret (ex: "web/github")
+        required_permission: "read", "write" (couvre delete), "admin"
 
     Returns:
         None si OK, dict {"status": "error", ...} si refusé
@@ -196,7 +199,7 @@ def check_path_policy(vault_id: str, path: str) -> Optional[dict]:
     if not store:
         return None
 
-    if store.is_path_allowed(policy_id, vault_id, path):
+    if store.is_path_allowed(policy_id, vault_id, path, required_permission):
         return None
 
     # Refusé — log audit
@@ -204,7 +207,7 @@ def check_path_policy(vault_id: str, path: str) -> Optional[dict]:
     try:
         from ..audit import log_audit
         log_audit(
-            "secret_read", "denied",
+            f"secret_{required_permission}", "denied",
             detail=f"Chemin '{path}' dans '{vault_id}' bloque par policy '{policy_id}'",
             client_name=client,
             vault_id=vault_id,
@@ -214,7 +217,11 @@ def check_path_policy(vault_id: str, path: str) -> Optional[dict]:
 
     return {
         "status": "error",
-        "message": f"Accès refusé au chemin '{path}' dans '{vault_id}' (policy '{policy_id}')",
+        "message": (
+            f"Accès refusé au chemin '{path}' dans '{vault_id}' (policy '{policy_id}')"
+            if path else
+            f"Accès refusé au vault '{vault_id}' (policy '{policy_id}')"
+        ),
         "policy_id": policy_id,
     }
 

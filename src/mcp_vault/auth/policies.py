@@ -273,15 +273,18 @@ class PolicyStore:
 
         return []  # Aucune règle applicable
 
-    def is_path_allowed(self, policy_id: str, vault_id: str, path: str) -> bool:
+    def is_path_allowed(self, policy_id: str, vault_id: str, path: str,
+                         required_permission: str = "read") -> bool:
         """
         Vérifie si un chemin de secret est autorisé dans un vault selon les path_rules.
 
         Logique :
         1. Pas de policy → autorisé
         2. Pas de path_rule matchant le vault → autorisé (pas de restriction path)
-        3. path_rule sans allowed_paths → autorisé (restriction vault-level seulement)
-        4. path_rule avec allowed_paths → le path doit matcher au moins un pattern
+        3. path_rule matchante → le chemin ET la permission doivent être autorisés :
+           a. La permission requise doit être dans rule["permissions"]
+              ("write" couvre delete ; "admin" couvre tout)
+           b. Si allowed_paths non vide → le path doit matcher au moins un pattern
 
         Les patterns supportent les wildcards (* via fnmatch).
 
@@ -289,9 +292,10 @@ class PolicyStore:
             policy_id: ID de la policy
             vault_id: ID du vault
             path: Chemin du secret (ex: "web/github", "db/postgres")
+            required_permission: Opération demandée : "read", "write" (couvre delete), "admin"
 
         Returns:
-            True si le chemin est autorisé
+            True si le chemin et la permission sont autorisés
         """
         policy = self.get(policy_id)
         if not policy:
@@ -300,10 +304,22 @@ class PolicyStore:
         # Chercher la première path_rule qui matche le vault
         for rule in policy.get("path_rules", []):
             if fnmatch.fnmatch(vault_id, rule["vault_pattern"]):
+                # Vérifier que l'opération est autorisée par cette règle.
+                # "write" couvre write+delete ; "admin" couvre tout.
+                rule_perms = set(rule.get("permissions", ["read", "write", "admin"]))
+                if required_permission == "admin":
+                    perm_ok = "admin" in rule_perms
+                elif required_permission == "write":
+                    perm_ok = bool(rule_perms & {"write", "admin"})
+                else:  # "read"
+                    perm_ok = bool(rule_perms & {"read", "write", "admin"})
+                if not perm_ok:
+                    return False
+
+                # Vérifier si le path matche un pattern autorisé
                 allowed_paths = rule.get("allowed_paths", [])
                 if not allowed_paths:
                     return True  # Pas de restriction path dans cette règle
-                # Vérifier si le path matche au moins un pattern autorisé
                 return any(fnmatch.fnmatch(path, p) for p in allowed_paths)
 
         return True  # Aucune règle vault matchante = pas de restriction path
