@@ -13,7 +13,7 @@ import platform
 from pathlib import Path
 
 from ..config import get_settings
-from ..auth.context import current_token_info, check_path_policy
+from ..auth.context import current_token_info, check_policy, check_path_policy
 from ..auth.token_store import get_token_store
 from ..auth.middleware import get_activity_log
 
@@ -88,6 +88,9 @@ async def _handle_admin_routes(scope, receive, send, mcp, token_info):
     if path == "/admin/api/vaults" and method == "POST":
         if not can_write:
             return await _json_response(send, 403, {"status": "error", "message": "Permission write requise"})
+        policy_err = check_policy("vault_create")
+        if policy_err:
+            return await _json_response(send, 403, policy_err)
         body = await _read_body(receive)
         return await _api_create_vault(send, body)
 
@@ -103,11 +106,17 @@ async def _handle_admin_routes(scope, receive, send, mcp, token_info):
             if method == "PUT":
                 if not can_write:
                     return await _json_response(send, 403, {"status": "error", "message": "Permission write requise"})
+                policy_err = check_policy("vault_update")
+                if policy_err:
+                    return await _json_response(send, 403, policy_err)
                 body = await _read_body(receive)
                 return await _api_update_vault(send, vault_id, body)
             if method == "DELETE":
                 if not is_admin:
                     return await _json_response(send, 403, {"status": "error", "message": "Permission admin requise"})
+                policy_err = check_policy("vault_delete")
+                if policy_err:
+                    return await _json_response(send, 403, policy_err)
                 return await _api_delete_vault(send, vault_id)
 
     # --- Routes SSH CA (write = setup/sign, read = ca-key/roles/role-info) ---
@@ -124,12 +133,18 @@ async def _handle_admin_routes(scope, receive, send, mcp, token_info):
         if method == "POST" and ssh_path == "setup":
             if not can_write:
                 return await _json_response(send, 403, {"status": "error", "message": "Permission write requise"})
+            policy_err = check_policy("ssh_ca_setup")
+            if policy_err:
+                return await _json_response(send, 403, policy_err)
             body = await _read_body(receive)
             return await _api_ssh_setup(send, vault_id, body)
 
         if method == "POST" and ssh_path == "sign":
             if not can_write:
                 return await _json_response(send, 403, {"status": "error", "message": "Permission write requise"})
+            policy_err = check_policy("ssh_sign_key")
+            if policy_err:
+                return await _json_response(send, 403, policy_err)
             body = await _read_body(receive)
             return await _api_ssh_sign(send, vault_id, body)
 
@@ -156,31 +171,43 @@ async def _handle_admin_routes(scope, receive, send, mcp, token_info):
             return await _json_response(send, 403, access_err)
 
         if method == "GET" and not secret_path:
-            path_err = check_path_policy(vault_id, "")
+            policy_err = check_policy("secret_list")
+            if policy_err:
+                return await _json_response(send, 403, policy_err)
+            path_err = check_path_policy(vault_id, "", "read")
             if path_err:
                 return await _json_response(send, 403, path_err)
             return await _api_list_secrets(send, vault_id)
         if method == "GET" and secret_path:
-            path_err = check_path_policy(vault_id, secret_path)
+            policy_err = check_policy("secret_read")
+            if policy_err:
+                return await _json_response(send, 403, policy_err)
+            path_err = check_path_policy(vault_id, secret_path, "read")
             if path_err:
                 return await _json_response(send, 403, path_err)
             return await _api_read_secret(send, vault_id, secret_path)
         if method == "POST":
             if not can_write:
                 return await _json_response(send, 403, {"status": "error", "message": "Permission write requise"})
+            policy_err = check_policy("secret_write")
+            if policy_err:
+                return await _json_response(send, 403, policy_err)
             body = await _read_body(receive)
             try:
                 data = json.loads(body) if body else {}
             except (json.JSONDecodeError, ValueError):
                 return await _json_response(send, 400, {"status": "error", "message": "JSON invalide"})
-            path_err = check_path_policy(vault_id, data.get("path", "").strip())
+            path_err = check_path_policy(vault_id, data.get("path", "").strip(), "write")
             if path_err:
                 return await _json_response(send, 403, path_err)
             return await _api_write_secret(send, vault_id, body)
         if method == "DELETE" and secret_path:
             if not can_write:
                 return await _json_response(send, 403, {"status": "error", "message": "Permission write requise"})
-            path_err = check_path_policy(vault_id, secret_path)
+            policy_err = check_policy("secret_delete")
+            if policy_err:
+                return await _json_response(send, 403, policy_err)
+            path_err = check_path_policy(vault_id, secret_path, "write")
             if path_err:
                 return await _json_response(send, 403, path_err)
             return await _api_delete_secret(send, vault_id, secret_path)
@@ -298,6 +325,13 @@ async def _api_create_token(send, body):
     if not client_name:
         return await _json_response(send, 400, {"status": "error", "message": "client_name requis"})
 
+    # Valider que la policy existe (cohérent avec l'outil MCP token_update)
+    if policy_id:
+        from ..auth.policies import get_policy_store
+        pstore = get_policy_store()
+        if pstore and not pstore.get(policy_id):
+            return await _json_response(send, 400, {"status": "error", "message": f"Policy '{policy_id}' non trouvée"})
+
     result = store.create(client_name, permissions, allowed_resources,
                           expires_in_days=expires_in_days, email=email,
                           policy_id=policy_id)
@@ -316,6 +350,13 @@ async def _api_update_token(send, hash_prefix, body):
     policy_id = data.get("policy_id")  # None si absent
     permissions = data.get("permissions")  # None si absent
     allowed_resources = data.get("allowed_resources")  # None si absent
+
+    # Valider que la policy existe si fournie et non vide (cohérent avec l'outil MCP)
+    if policy_id and policy_id != "_remove":
+        from ..auth.policies import get_policy_store
+        pstore = get_policy_store()
+        if pstore and not pstore.get(policy_id):
+            return await _json_response(send, 400, {"status": "error", "message": f"Policy '{policy_id}' non trouvée"})
 
     result = store.update(
         hash_prefix=hash_prefix,

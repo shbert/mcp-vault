@@ -1,5 +1,33 @@
 # Changelog — MCP Vault
 
+## [0.4.12] — 2026-06-07
+
+### Security — Résultats de l'audit de synchronisation CLI/Shell/Admin
+
+#### BLOQUANT 1 — API REST admin contournait les policies tool-level (F1)
+Les outils MCP appelaient `check_policy()` avant chaque action, mais les routes REST `/admin/api` ne le faisaient pas. Un token `write` avec une policy interdisant `secret_write` ou `vault_create` pouvait contourner la restriction via l'interface `/admin`.
+
+**Correctif** : `check_policy("vault_create")`, `check_policy("vault_update")`, `check_policy("vault_delete")`, `check_policy("secret_list")`, `check_policy("secret_read")`, `check_policy("secret_write")`, `check_policy("secret_delete")`, `check_policy("ssh_ca_setup")`, `check_policy("ssh_sign_key")` ajoutés dans `admin/api.py` sur toutes les routes CRUD correspondantes. Les tokens admin contournent toujours les policies (comportement inchangé).
+
+#### BLOQUANT 2 — `path_rules.permissions` stockées mais jamais appliquées (F2)
+Le modèle de policy acceptait `read/write/admin` par chemin de secret, mais `check_path_policy()` ne vérifiait que les `allowed_paths`. Un token avec `permissions: ["read"]` pouvait écrire/supprimer dans les chemins autorisés.
+
+**Correctif** :
+- `is_path_allowed()` (`policies.py`) : nouveau paramètre `required_permission` vérifié contre `rule["permissions"]` ("write" couvre delete, "admin" couvre tout).
+- `check_path_policy()` (`context.py`) : propagation du `required_permission` ("read", "write").
+- Tous les appelants MCP et REST admin mis à jour avec la permission appropriée.
+
+#### MOYEN 5 — Policy inexistante acceptée par l'API REST (F5)
+L'API admin REST pouvait créer/modifier un token avec un `policy_id` invalide (alors que l'outil MCP `token_update` validait l'existence). Résultat : token bloqué fail-close.
+
+**Correctif** : validation de l'existence de la policy dans `_api_create_token()` et `_api_update_token()`.
+
+### Fichiers modifiés
+- `src/mcp_vault/admin/api.py` — F1 (check_policy) + F5 (validation policy)
+- `src/mcp_vault/auth/policies.py` — F2 (is_path_allowed avec required_permission)
+- `src/mcp_vault/auth/context.py` — F2 (check_path_policy avec required_permission)
+- `src/mcp_vault/server.py` — F2 (appelants MCP avec permission explicite)
+
 ## [0.4.11] — 2026-06-07
 
 ### Fix — Sentinel `_remove` stocké littéralement dans la policy des tokens (/admin)

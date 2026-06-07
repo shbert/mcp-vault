@@ -332,7 +332,7 @@ async def secret_write(vault_id: str, path: str, data: dict,
     access_err = check_access(vault_id)
     if access_err:
         return access_err
-    path_err = check_path_policy(vault_id, path)
+    path_err = check_path_policy(vault_id, path, "write")
     if path_err:
         return path_err
     write_err = check_write_permission()
@@ -361,7 +361,7 @@ async def secret_read(vault_id: str, path: str, version: int = 0) -> dict:
     access_err = check_access(vault_id)
     if access_err:
         return access_err
-    path_err = check_path_policy(vault_id, path)
+    path_err = check_path_policy(vault_id, path, "read")
     if path_err:
         return path_err
 
@@ -387,7 +387,7 @@ async def secret_list(vault_id: str, path: str = "") -> dict:
     if access_err:
         return access_err
     # SÉCURITÉ V2-05b : check_path_policy sur secret_list (consistance avec read/write/delete)
-    path_err = check_path_policy(vault_id, path)
+    path_err = check_path_policy(vault_id, path, "read")
     if path_err:
         return path_err
 
@@ -412,7 +412,7 @@ async def secret_delete(vault_id: str, path: str) -> dict:
     access_err = check_access(vault_id)
     if access_err:
         return access_err
-    path_err = check_path_policy(vault_id, path)
+    path_err = check_path_policy(vault_id, path, "write")
     if path_err:
         return path_err
     write_err = check_write_permission()
