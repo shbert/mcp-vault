@@ -74,6 +74,14 @@ async def vault_startup() -> bool:
     except Exception as e:
         logger.error(f"❌ Audit Store : {e}")
 
+    # ── 1d. Wrap Registry (JIT broker mcp-mission) ─────────────────
+    logger.info("🔐 Initialisation du Wrap Registry...")
+    try:
+        from .vault.wrapping import init_wrap_registry
+        init_wrap_registry()
+    except Exception as e:
+        logger.error(f"❌ Wrap Registry : {e}")
+
     # ── 2. Vérifier les données locales (Docker volume) ───────────
     data_dir = Path(settings.openbao_data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,54 @@
 # Changelog — MCP Vault
 
+## [0.4.13] — 2026-06-07
+
+### Feature — JIT Wrap Broker pour mcp-mission V1 (issue #7)
+
+Implémentation du contrat `VaultClient` attendu par `mcp-mission/CredentialBrokerService` (#110, #72, #74).
+
+#### 3 nouveaux outils MCP (accès admin requis)
+
+| Outil | Contrat |
+|---|---|
+| `secret_wrap(vault_id, secret_path, mission_id, operation_id, ttl_seconds)` | Crée un wrap token single-use OpenBao (cubbyhole) scopé à la mission. Retourne `{wrap_token, secret_id, accessor, vault_url, expires_at, intended_use}`. |
+| `secret_revoke_wrap(lease_id)` | Révoque un wrap token — **idempotent** : `not_found` / `already_revoked` → status OK. Erreur réseau → erreur réelle. |
+| `secret_wrap_lookup(operation_id)` | Retrouve et révoque les wraps orphelins par `operation_id`. États : `not_found` \| `found_unattached` \| `already_revoked` \| `revoked` \| `ambiguous`. |
+
+#### Architecture write-ahead (compensation #74)
+
+Le `WrapRegistry` (S3 `_system/wrap_registry.json`) implémente un write-ahead strict :
+1. Enregistrement `"pending"` **avant** l'appel OpenBao
+2. Passage `"active"` avec l'accessor **après** succès
+3. Si crash entre 1 et 2 → `lookup` retourne `"found_unattached"` ; le TTL Vault gérera l'expiration
+
+#### Invariants de sécurité
+
+- `wrap_token` jamais loggué, stocké dans le registry, ni inclus dans les erreurs
+- Registry ne stocke que l'`accessor` (non utilisable seul pour unwrap)
+- `revoke_wrap` refuse tout accessor absent du registry (pas de révocation hors scope)
+- `wrap_secret` fail-close si registry S3 indisponible (compensation impossible)
+- `mark_active` en échec → révocation immédiate de l'accessor + erreur
+- `check_access` + `check_path_policy` appliqués avant wrap
+
+#### Limitations V1 documentées
+
+- WrapRegistry : last-write-wins (pas de CAS S3) → single broker en V1
+- `found_unattached` : pas de révocation possible sans accessor (TTL 300s max)
+
+#### Tests
+
+- `tests/test_wrap.py` — **15 tests** (15/15) : write-ahead, idempotence revoke, états lookup, anti-fuite, rollback registry, fail-close registry=None, chemins réservés, validation server
+
+#### Revues codex
+
+5 passes itératives → APPROUVÉ. 10 findings traités (2 CRITICAL, 5 HIGH, 3 MEDIUM).
+
+### Fichiers modifiés
+- `src/mcp_vault/vault/wrapping.py` — NOUVEAU (WrapRegistry + wrap/revoke/lookup)
+- `src/mcp_vault/server.py` — 3 outils MCP (secret_wrap, secret_revoke_wrap, secret_wrap_lookup)
+- `src/mcp_vault/lifecycle.py` — init_wrap_registry au startup
+- `tests/test_wrap.py` — NOUVEAU (15 tests)
+
 ## [0.4.12] — 2026-06-07
 
 ### Security — Résultats de l'audit de synchronisation CLI/Shell/Admin

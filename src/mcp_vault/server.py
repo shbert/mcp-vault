@@ -423,6 +423,132 @@ async def secret_delete(vault_id: str, path: str) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# OUTILS MCP — JIT Wrap Broker (mcp-mission)
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+async def secret_wrap(
+    vault_id: str,
+    secret_path: str,
+    mission_id: str,
+    operation_id: str,
+    ttl_seconds: int = 300,
+) -> dict:
+    """
+    Crée un wrap token single-use pour (vault_id, secret_path) scopé à une mission JIT.
+
+    Contrat VaultClient pour mcp-mission CredentialBrokerService.
+    Le secret en clair ne transite jamais — OpenBao cubbyhole garantit le single-use.
+    Le wrap_token retourné ne doit jamais être loggué côté broker.
+
+    Args:
+        vault_id: Vault source du secret
+        secret_path: Chemin du secret dans le vault
+        mission_id: Identifiant de la mission (scope)
+        operation_id: Corrélation write-ahead pour compensation des orphelins (#74)
+        ttl_seconds: TTL du wrap token en secondes (défaut: 300s = 5 min)
+
+    Returns:
+        {status, wrap_token (SENSIBLE), secret_id, accessor, vault_url, expires_at, intended_use}
+    """
+    from .auth.context import check_admin_permission, check_access, check_path_policy
+    from .vault.wrapping import wrap_secret
+
+    # check_admin assure que seul mcp-mission (token admin) peut créer des wraps
+    admin_err = check_admin_permission()
+    if admin_err:
+        return admin_err
+
+    if ttl_seconds < 60 or ttl_seconds > 3600:
+        return {"status": "error", "message": "ttl_seconds doit être entre 60 et 3600"}
+
+    # Vérification d'accès au vault (owner/allowed_resources) + policy path
+    access_err = check_access(vault_id)
+    if access_err:
+        return access_err
+    path_err = check_path_policy(vault_id, secret_path, "read")
+    if path_err:
+        return path_err
+
+    result = await wrap_secret(vault_id, secret_path, mission_id, operation_id, ttl_seconds)
+    # Ne pas logguer le wrap_token dans l'audit — seuls les champs non-sensibles
+    audit_result = {k: v for k, v in result.items() if k != "wrap_token"}
+    _r("secret_wrap", audit_result, vault_id, f"op={operation_id[:32]}")
+    return result
+
+
+@mcp.tool()
+async def secret_revoke_wrap(lease_id: str) -> dict:
+    """
+    Révoque un wrap token de façon IDEMPOTENTE.
+
+    Contrat VaultClient pour mcp-mission : revoke(lease_id) → idempotent.
+    lease_id introuvable ou déjà révoqué = SUCCÈS (jamais une erreur dure).
+    Erreur réseau ou 5xx = erreur réelle (le broker doit retenter).
+
+    Args:
+        lease_id: Accessor du wrap token (retourné par secret_wrap)
+
+    Returns:
+        {status: "ok", state: "revoked" | "already_revoked" | "not_found"}
+    """
+    from .auth.context import check_admin_permission
+    from .vault.wrapping import revoke_wrap
+
+    admin_err = check_admin_permission()
+    if admin_err:
+        return admin_err
+
+    if not lease_id:
+        return {"status": "error", "message": "lease_id requis"}
+
+    result = await revoke_wrap(lease_id)
+    _r("secret_revoke_wrap", result, detail=f"prefix={lease_id[:8]}...")
+    return result
+
+
+@mcp.tool()
+async def secret_wrap_lookup(operation_id: str) -> dict:
+    """
+    Retrouve et révoque les wraps créés avec un operation_id donné.
+
+    Utilisé par mcp-mission pour compenser les provisions orphelines (#74) :
+    si le broker crashe entre un wrap réussi côté Vault et sa confirmation,
+    ce tool permet de retrouver et révoquer les wraps non rattachés.
+
+    États retournés (idempotent) :
+        not_found        — aucune provision pour cet operation_id
+        found_unattached — provision trouvée, révoquée maintenant
+        already_revoked  — déjà révoqué lors d'un appel précédent
+        revoked          — révocation effectuée maintenant
+        ambiguous        — plusieurs provisions (toutes révoquées)
+
+    Args:
+        operation_id: Identifiant de corrélation write-ahead
+
+    Returns:
+        {status, state, operation_id, count_revoked, entries_found}
+    """
+    from .auth.context import check_admin_permission
+    from .vault.wrapping import lookup_and_revoke_by_operation_id
+
+    admin_err = check_admin_permission()
+    if admin_err:
+        return admin_err
+
+    from .vault.wrapping import lookup_and_revoke_by_operation_id, _SAFE_ID_RE
+    if not operation_id:
+        return {"status": "error", "message": "operation_id requis"}
+    if not _SAFE_ID_RE.match(operation_id):
+        return {"status": "error", "error_type": "invalid_input",
+                "message": "operation_id invalide (alphanum + _-:., 1-256 chars)"}
+
+    result = await lookup_and_revoke_by_operation_id(operation_id)
+    _r("secret_wrap_lookup", result, detail=f"op={operation_id[:32]}")
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # OUTILS MCP — Types & Utilitaires
 # ═══════════════════════════════════════════════════════════════════════
 
