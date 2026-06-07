@@ -76,6 +76,9 @@ async def _handle_admin_routes(scope, receive, send, mcp, token_info):
 
     # --- Routes vaults (read = list/detail, write = create/update, admin = delete) ---
     if path == "/admin/api/vaults" and method == "GET":
+        policy_err = check_policy("vault_list")
+        if policy_err:
+            return await _json_response(send, 403, policy_err)
         if is_admin:
             return await _api_list_vaults(send)
         elif allowed_vaults:
@@ -102,6 +105,9 @@ async def _handle_admin_routes(scope, receive, send, mcp, token_info):
             if access_err:
                 return await _json_response(send, 403, access_err)
             if method == "GET":
+                policy_err = check_policy("vault_info")
+                if policy_err:
+                    return await _json_response(send, 403, policy_err)
                 return await _api_vault_detail(send, vault_id)
             if method == "PUT":
                 if not can_write:
@@ -149,14 +155,23 @@ async def _handle_admin_routes(scope, receive, send, mcp, token_info):
             return await _api_ssh_sign(send, vault_id, body)
 
         if method == "GET" and ssh_path == "ca-key":
+            policy_err = check_policy("ssh_ca_public_key")
+            if policy_err:
+                return await _json_response(send, 403, policy_err)
             return await _api_ssh_ca_key(send, vault_id)
 
         if method == "GET" and ssh_path == "roles":
+            policy_err = check_policy("ssh_ca_list_roles")
+            if policy_err:
+                return await _json_response(send, 403, policy_err)
             return await _api_ssh_roles(send, vault_id)
 
         if method == "GET" and ssh_path.startswith("roles/"):
             role_name = ssh_path[len("roles/"):]
             if role_name:
+                policy_err = check_policy("ssh_ca_role_info")
+                if policy_err:
+                    return await _json_response(send, 403, policy_err)
                 return await _api_ssh_role_info(send, vault_id, role_name)
 
     # --- Routes secrets (read = list/get, write = create, admin = delete) ---

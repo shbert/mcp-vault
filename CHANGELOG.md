@@ -1,5 +1,37 @@
 # Changelog — MCP Vault
 
+## [0.4.14] — 2026-06-07
+
+### Security — Correctifs auth CRITIQUE + ÉLEVÉ (audit codex)
+
+#### CRITIQUE — `ssh_sign_key` ne vérifiait pas la permission `write`
+Un token `read` ayant accès au vault pouvait signer des clés SSH (opération d'émission de credential).
+**Correctif** : `check_write_permission()` ajouté dans `ssh_sign_key` ([server.py](src/mcp_vault/server.py)), cohérent avec `ssh_ca_setup`.
+
+#### ÉLEVÉ — Policy enforcement fail-open si `PolicyStore` absent
+`check_policy()` et `check_path_policy()` retournaient `None` si le PolicyStore était absent, même si le token portait un `policy_id` — bypass complet des restrictions.
+**Correctif** : fail-close avec audit explicite si `policy_id` présent sans PolicyStore disponible ([context.py](src/mcp_vault/auth/context.py)).
+
+#### ÉLEVÉ — `GET /admin/api/vaults/{vault_id}` sans `check_policy()`
+La route de détail vault listait tous les secrets/rôles SSH sans vérification de policy — bypass enumération pour tokens avec `path_rules`.
+**Correctif** : `check_policy("vault_info")` ajouté avant `_api_vault_detail()`.
+
+#### ÉLEVÉ — Routes REST SSH read (`ca-key`, `roles`, `role-info`) sans `check_policy()`
+Incohérence avec les outils MCP équivalents qui appellent bien `check_policy()`.
+**Correctif** : `check_policy("ssh_ca_public_key/list_roles/role_info")` ajoutés sur les 3 routes GET SSH.
+
+#### Complément — `GET /admin/api/vaults` sans `check_policy("vault_list")`
+Manquait pour compléter la parité REST/MCP sur la liste des vaults.
+**Correctif** : `check_policy("vault_list")` ajouté.
+
+### Revue codex
+APPROUVÉ — tous les noms d'outils vérifiés cohérents avec `_TOOL_LABELS` et outils MCP.
+
+### Fichiers modifiés
+- `src/mcp_vault/server.py` — `ssh_sign_key` : check_write_permission
+- `src/mcp_vault/auth/context.py` — check_policy + check_path_policy : fail-close PolicyStore absent
+- `src/mcp_vault/admin/api.py` — check_policy sur vault_list, vault_info, SSH read routes
+
 ## [0.4.13] — 2026-06-07
 
 ### Feature — JIT Wrap Broker pour mcp-mission V1 (issue #7)

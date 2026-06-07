@@ -775,7 +775,7 @@ async def ssh_sign_key(vault_id: str, role_name: str, public_key: str,
         public_key: Contenu de la clé publique SSH
         ttl: Durée de validité du certificat
     """
-    from .auth.context import check_access, check_policy
+    from .auth.context import check_access, check_write_permission, check_policy
     from .vault.ssh_ca import sign_ssh_key
 
     policy_err = check_policy("ssh_sign_key")
@@ -784,6 +784,9 @@ async def ssh_sign_key(vault_id: str, role_name: str, public_key: str,
     access_err = check_access(vault_id)
     if access_err:
         return access_err
+    write_err = check_write_permission()
+    if write_err:
+        return write_err
 
     return _r("ssh_sign_key", await sign_ssh_key(vault_id, role_name, public_key, ttl), vault_id, role_name)
 
