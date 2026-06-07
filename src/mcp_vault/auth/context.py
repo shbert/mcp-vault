@@ -111,8 +111,9 @@ def check_policy(tool_name: str) -> Optional[dict]:
     1. Pas de token → pas de restriction (géré par check_access)
     2. Admin → toujours autorisé
     3. Pas de policy_id → tout autorisé
-    4. Policy existe → vérifier via is_tool_allowed()
-    5. Policy introuvable → pas de restriction (fail-open)
+    4. PolicyStore absent + policy_id présent → fail-close (la policy ne peut être vérifiée)
+    5. Policy existe → vérifier via is_tool_allowed()
+    6. Policy introuvable dans le store → fail-close (cohérent avec policies.py)
 
     Args:
         tool_name: Nom de l'outil MCP (ex: "vault_delete", "ssh_sign_key")
@@ -140,7 +141,20 @@ def check_policy(tool_name: str) -> Optional[dict]:
 
     store = get_policy_store()
     if not store:
-        return None  # Pas de PolicyStore → pas de restriction
+        # PolicyStore absent mais token porte un policy_id : on ne peut pas vérifier
+        # → fail-close pour éviter qu'une policy soit contournée par indisponibilité S3.
+        # Si S3 n'est pas configuré du tout, les tokens n'ont jamais de policy_id.
+        client = token_info.get("client_name", "?")
+        try:
+            from ..audit import log_audit
+            log_audit(tool_name, "denied",
+                      detail=f"PolicyStore indisponible — policy '{policy_id}' non vérifiable",
+                      client_name=client)
+        except Exception:
+            pass
+        return {"status": "error",
+                "message": f"PolicyStore indisponible — policy '{policy_id}' ne peut être vérifiée",
+                "policy_id": policy_id}
 
     if store.is_tool_allowed(policy_id, tool_name):
         return None
@@ -197,7 +211,18 @@ def check_path_policy(vault_id: str, path: str,
 
     store = get_policy_store()
     if not store:
-        return None
+        # Fail-close cohérent avec check_policy() : policy_id présent sans PolicyStore → refus
+        client = token_info.get("client_name", "?")
+        try:
+            from ..audit import log_audit
+            log_audit(f"secret_{required_permission}", "denied",
+                      detail=f"PolicyStore indisponible — path policy '{policy_id}' non vérifiable",
+                      client_name=client, vault_id=vault_id)
+        except Exception:
+            pass
+        return {"status": "error",
+                "message": f"PolicyStore indisponible — path policy '{policy_id}' ne peut être vérifiée",
+                "policy_id": policy_id}
 
     if store.is_path_allowed(policy_id, vault_id, path, required_permission):
         return None
