@@ -445,7 +445,8 @@ async def test_04_token_store():
     try:
         result = store.create(client_name="to-revoke", permissions=["read"])
         hp = result["hash"][:12]
-        ok = store.revoke(hp)
+        revoke_result = store.revoke(hp)
+        ok = revoke_result.get("status") == "ok"
         # Reload and verify persistence
         store3 = TokenStore(settings)
         store3.S3_KEY = token_key

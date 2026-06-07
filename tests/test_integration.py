@@ -376,7 +376,7 @@ class TestTokenStoreS3:
         hash_prefix = result["hash"][:12]
 
         # Révoquer
-        assert store.revoke(hash_prefix) is True
+        assert store.revoke(hash_prefix).get("status") == "ok"
         print(f"  ✅ Token révoqué: {hash_prefix}...")
 
         # Vérifier
