@@ -16,8 +16,11 @@ Usage :
 
 import fnmatch
 import json
+import logging
 import sys
 import time
+
+logger = logging.getLogger("mcp-vault.policy-store")
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -90,8 +93,12 @@ class PolicyStore:
             else:
                 print(f"⚠️  Policy Store S3 : {e}", file=sys.stderr)
 
-    def _save(self):
-        """Sauvegarde les policies sur S3 (PUT = SigV2)."""
+    def _save(self) -> bool:
+        """
+        Sauvegarde les policies sur S3 (PUT = SigV2).
+        Retourne True si succès, False si S3 indisponible.
+        Les appelants doivent rollback l'état mémoire si False est retourné.
+        """
         try:
             s3 = self._get_s3_data()
             data = json.dumps(
@@ -104,8 +111,10 @@ class PolicyStore:
                 Body=data.encode(),
                 ContentType="application/json",
             )
+            return True
         except Exception as e:
-            print(f"⚠️  Policy Store S3 save : {e}", file=sys.stderr)
+            logger.error("Policy Store S3 save FAILED: %s — état mémoire non persisté", type(e).__name__)
+            return False
 
     def _maybe_refresh(self):
         """Rafraîchit le cache si le TTL est dépassé."""
@@ -176,7 +185,10 @@ class PolicyStore:
         }
 
         self._policies[policy_id] = policy
-        self._save()
+        if not self._save():
+            del self._policies[policy_id]  # rollback mémoire
+            return {"status": "error", "error_type": "storage_unavailable",
+                    "message": "Impossible de créer la policy (S3 indisponible)"}
 
         return {"status": "created", **policy}
 
@@ -201,14 +213,24 @@ class PolicyStore:
             for p in self._policies.values()
         ]
 
-    def delete(self, policy_id: str) -> bool:
-        """Supprime une policy par son ID. Retourne True si supprimée."""
+    def delete(self, policy_id: str):
+        """
+        Supprime une policy par son ID.
+
+        Retourne :
+          True             — supprimée avec succès
+          False            — policy introuvable
+          "storage_error"  — S3 indisponible (rollback effectué, policy toujours présente)
+        """
         self._maybe_refresh()
-        if policy_id in self._policies:
-            del self._policies[policy_id]
-            self._save()
-            return True
-        return False
+        if policy_id not in self._policies:
+            return False
+        policy_backup = self._policies.pop(policy_id)
+        if not self._save():
+            self._policies[policy_id] = policy_backup  # rollback
+            logger.error("Suppression policy '%s' non persistée — S3 indisponible", policy_id)
+            return "storage_error"
+        return True
 
     def count(self) -> int:
         """Nombre de policies."""

@@ -1,5 +1,39 @@
 # Changelog — MCP Vault
 
+## [0.4.16] — 2026-06-08
+
+### Tests & Security — Résiduels finaux (suite de l'audit complet)
+
+#### Tests non-complaisant — test_admin_context.py (HAUT)
+`test_admin_api_injects_contextvar` et `test_admin_api_bootstrap_token_contextvar` réécrits :
+appellent maintenant `handle_admin_api()` via scope ASGI fake + patch `_get_token_info` + spy `_json_response`.
+Capturent `get_current_client_name()` pendant la requête → non-complaisant.
+Si l'injection ContextVar était supprimée d'`api.py`, les tests échoueraient.
+
+#### Sécurité — `policies.py _save()` silencieux (même pattern que TokenStore)
+- `_save()` retourne `bool` + `logger.error`
+- `create()` : rollback `del` si S3 KO
+- `delete()` retourne `True` / `False` / `"storage_error"` pour distinguer les 3 cas
+- `admin/api.py` : HTTP 503 si `storage_error` sur create/delete policy
+- `server.py policy_delete` : retourne `error_type=storage_unavailable`
+
+#### Sécurité — `create_app()` fail-fast bootstrap key
+`create_app()` valide maintenant `ADMIN_BOOTSTRAP_KEY` et lève `RuntimeError` si faible/par défaut.
+Protège les déploiements ASGI directs (`uvicorn factory`) hors `server.main()`.
+
+#### Correction clés de test
+`test_admin_context.py` et `test_openbao_config.py` : clé de test `test-bootstrap-key-for-unit-tests` (2 classes de caractères → invalide) remplacée par `Test-Bootstrap-Key-2026-Pour-Tests!!`.
+
+#### Mise à jour .clinerules
+Règle ajoutée : revue Codex obligatoire avant tout merge (procédure explicite).
+
+### Fichiers modifiés
+- `src/mcp_vault/auth/policies.py` — _save bool + rollbacks + delete 3-valued
+- `src/mcp_vault/server.py` — create_app fail-fast + policy_delete storage_error
+- `src/mcp_vault/admin/api.py` — HTTP 503 create/delete policy + revoke 400/503
+- `tests/test_admin_context.py` — réécriture ASGI non-complaisant + clé test forte
+- `tests/test_openbao_config.py` — clé test forte
+
 ## [0.4.15] — 2026-06-07
 
 ### Security & Tests — Audit complet non-complaisance + résiduels auth

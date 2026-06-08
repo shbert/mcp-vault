@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 # Fixer les env vars minimales pour que Settings() ne plante pas
 os.environ.setdefault("MCP_SERVER_NAME", "mcp-vault-test")
-os.environ.setdefault("ADMIN_BOOTSTRAP_KEY", "test-bootstrap-key-for-unit-tests")
+os.environ.setdefault("ADMIN_BOOTSTRAP_KEY", "Test-Bootstrap-Key-2026-Pour-Tests!!")
 
 
 # =============================================================================
@@ -42,34 +42,71 @@ class TestAdminApiContextVar:
 
     def test_admin_api_injects_contextvar(self):
         """
-        Simule le flux handle_admin_api : après injection du ContextVar,
-        get_current_client_name() doit retourner le client du token.
+        handle_admin_api() doit injecter token_info dans le ContextVar AVANT d'appeler
+        la route downstream. Test comportemental : si l'injection était supprimée,
+        get_current_client_name() retournerait "anonymous".
+        
+        On appelle GET /admin/api/whoami qui retourne {**token_info} inline
+        après que handle_admin_api a injecté le ContextVar. On capture
+        get_current_client_name() via un patch de _json_response.
         """
-        from mcp_vault.auth.context import current_token_info, get_current_client_name
+        import asyncio
+        from mcp_vault.admin.api import handle_admin_api
+        from mcp_vault.auth.context import get_current_client_name
+        from unittest.mock import patch, AsyncMock
 
-        # Simule ce que handle_admin_api fait maintenant après le fix
+        seen_during_response = []
+
+        async def spy_json_response(send, status, body):
+            seen_during_response.append(get_current_client_name())
+            await send({"type": "http.response.start", "status": status, "headers": []})
+            import json
+            await send({"type": "http.response.body", "body": json.dumps(body).encode()})
+
         token_info = {
             "client_name": "CEY",
             "permissions": ["read", "write"],
             "allowed_resources": [],
             "auth_type": "token",
         }
-        ctx_token = current_token_info.set(token_info)
-        try:
-            name = get_current_client_name()
-            assert name == "CEY", f"Expected 'CEY', got '{name}'"
-        finally:
-            current_token_info.reset(ctx_token)
 
-        # Après reset, on doit revenir à "anonymous"
-        name_after = get_current_client_name()
-        assert name_after == "anonymous", f"Expected 'anonymous' after reset, got '{name_after}'"
+        scope = {
+            "type": "http", "method": "GET", "path": "/admin/api/whoami",
+            "query_string": b"",
+            "headers": [(b"authorization", b"Bearer test-token")],
+        }
+
+        async def receive(): return {"type": "http.request", "body": b"", "more_body": False}
+        responses = []
+        async def send_fn(msg): responses.append(msg)
+
+        with patch("mcp_vault.admin.api._get_token_info", return_value=token_info), \
+             patch("mcp_vault.admin.api._json_response", side_effect=spy_json_response):
+            asyncio.get_event_loop().run_until_complete(
+                handle_admin_api(scope, receive, send_fn, mcp=None)
+            )
+
+        assert seen_during_response, "La route /admin/api/whoami n'a pas été appelée"
+        assert seen_during_response[0] == "CEY", \
+            f"handle_admin_api doit injecter le ContextVar avant la route, obtenu '{seen_during_response[0]}'"
 
     def test_admin_api_bootstrap_token_contextvar(self):
         """
-        Vérifie que le bootstrap token (admin) propage aussi le ContextVar.
+        Le bootstrap token (admin) propage aussi le ContextVar via handle_admin_api().
+        Test comportemental : si l'injection était supprimée, on obtiendrait "anonymous".
         """
-        from mcp_vault.auth.context import current_token_info, get_current_client_name
+        import asyncio
+        from mcp_vault.admin.api import handle_admin_api
+        from mcp_vault.auth.context import get_current_client_name
+        from unittest.mock import patch
+
+        seen_during_response = []
+
+        async def spy_json_response(send, status, body):
+            seen_during_response.append(get_current_client_name())
+            await send({"type": "http.response.start", "status": status, "headers": []})
+            import json
+            await send({"type": "http.response.body", "body": json.dumps(body).encode()})
 
         token_info = {
             "client_name": "admin",
@@ -77,12 +114,25 @@ class TestAdminApiContextVar:
             "allowed_resources": [],
             "auth_type": "bootstrap",
         }
-        ctx_token = current_token_info.set(token_info)
-        try:
-            name = get_current_client_name()
-            assert name == "admin", f"Expected 'admin', got '{name}'"
-        finally:
-            current_token_info.reset(ctx_token)
+
+        scope = {
+            "type": "http", "method": "GET", "path": "/admin/api/whoami",
+            "query_string": b"",
+            "headers": [(b"authorization", b"Bearer bootstrap-key")],
+        }
+
+        async def receive(): return {"type": "http.request", "body": b"", "more_body": False}
+        async def send_fn(msg): pass
+
+        with patch("mcp_vault.admin.api._get_token_info", return_value=token_info), \
+             patch("mcp_vault.admin.api._json_response", side_effect=spy_json_response):
+            asyncio.get_event_loop().run_until_complete(
+                handle_admin_api(scope, receive, send_fn, mcp=None)
+            )
+
+        assert seen_during_response, "La route /admin/api/whoami n'a pas été appelée"
+        assert seen_during_response[0] == "admin", \
+            f"Bootstrap token doit propager client_name='admin' via ContextVar : obtenu '{seen_during_response[0]}'"
 
     def test_without_fix_would_be_anonymous(self):
         """

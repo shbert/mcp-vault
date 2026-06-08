@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import os, sys
 os.environ.setdefault("MCP_SERVER_NAME", "mcp-vault-test")
-os.environ.setdefault("ADMIN_BOOTSTRAP_KEY", "test-bootstrap-key-for-unit-tests")
+os.environ.setdefault("ADMIN_BOOTSTRAP_KEY", "Test-Bootstrap-Key-2026-Pour-Tests!!")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from mcp_vault.openbao.config import _compute_openbao_listen_addr
 def test_compute_openbao_listen_addr_default_port():
