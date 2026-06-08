@@ -645,7 +645,12 @@ async def _api_create_policy(send, body):
         path_rules=data.get("path_rules", []),
         created_by=get_current_client_name(),
     )
-    status_code = 201 if result.get("status") == "created" else 400
+    if result.get("status") == "created":
+        status_code = 201
+    elif result.get("error_type") == "storage_unavailable":
+        status_code = 503
+    else:
+        status_code = 400
     await _json_response(send, status_code, result)
 
 
@@ -670,8 +675,11 @@ async def _api_delete_policy(send, policy_id):
     if not store:
         return await _json_response(send, 400, {"status": "error", "message": "S3 non configuré"})
 
-    if store.delete(policy_id):
+    result = store.delete(policy_id)
+    if result is True:
         await _json_response(send, 200, {"status": "deleted", "policy_id": policy_id})
+    elif result == "storage_error":
+        await _json_response(send, 503, {"status": "error", "message": "Suppression non persistée (S3 indisponible)"})
     else:
         await _json_response(send, 404, {"status": "error", "message": f"Policy '{policy_id}' non trouvée"})
 

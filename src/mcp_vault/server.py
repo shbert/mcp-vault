@@ -724,8 +724,12 @@ async def policy_delete(policy_id: str, confirm: bool = False) -> dict:
     if not store:
         return {"status": "error", "message": "Policy Store non configuré (S3 requis)"}
 
-    if store.delete(policy_id):
-        return {"status": "deleted", "policy_id": policy_id}
+    result = store.delete(policy_id)
+    if result is True:
+        return _r("policy_delete", {"status": "deleted", "policy_id": policy_id})
+    elif result == "storage_error":
+        return {"status": "error", "error_type": "storage_unavailable",
+                "message": "Suppression non persistée (S3 indisponible)"}
     else:
         return {"status": "error", "message": f"Policy '{policy_id}' non trouvée"}
 
@@ -985,7 +989,22 @@ async def audit_log(limit: int = 50, client: str = "", vault_id: str = "",
 # ═══════════════════════════════════════════════════════════════════════
 
 def create_app():
-    """Construit la stack ASGI complète."""
+    """
+    Construit la stack ASGI complète.
+
+    Inclut le fail-fast bootstrap key : si ADMIN_BOOTSTRAP_KEY est vide/par défaut/faible,
+    lève RuntimeError avant de construire la stack — protège les déploiements ASGI directs
+    (ex: `uvicorn mcp_vault.server:create_app --factory`) en dehors du chemin server.main().
+    """
+    from .openbao.crypto import validate_bootstrap_key
+    is_valid, msg = validate_bootstrap_key(settings.admin_bootstrap_key)
+    if not is_valid:
+        raise RuntimeError(
+            f"ADMIN_BOOTSTRAP_KEY invalide — démarrage refusé : {msg}\n"
+            "Définissez une clé forte via ADMIN_BOOTSTRAP_KEY "
+            "(ex: python -c \"import secrets; print(secrets.token_urlsafe(48))\")."
+        )
+
     from .auth.middleware import AuthMiddleware, LoggingMiddleware, HealthCheckMiddleware
     from .admin.middleware import AdminMiddleware
 
