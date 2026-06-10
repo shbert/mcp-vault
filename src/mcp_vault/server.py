@@ -664,7 +664,10 @@ async def secret_consume(
 
 # Cache mémoire pour les statuts de mission (évite les appels répétés)
 _mission_status_cache: dict[str, tuple[bool, float]] = {}
-_mission_status_lock = None
+# Lock créé au chargement du module — évite la race condition de création lazy
+import asyncio as _asyncio_for_lock
+_mission_status_lock = _asyncio_for_lock.Lock()
+del _asyncio_for_lock
 
 
 async def _check_mission_active(
@@ -677,12 +680,8 @@ async def _check_mission_active(
     Fail-close : toute erreur de connexion → (False, "service_unavailable").
     Cache TTL court (défaut 5s) pour réduire la fenêtre post-abort.
     """
-    global _mission_status_lock
-    import asyncio
-    if _mission_status_lock is None:
-        _mission_status_lock = asyncio.Lock()
-
-    now = __import__("time").time()
+    import time as _time
+    now = _time.time()
     async with _mission_status_lock:
         if mission_id in _mission_status_cache:
             cached_ok, cached_at = _mission_status_cache[mission_id]

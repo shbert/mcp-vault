@@ -322,18 +322,26 @@ class WrapRegistry:
                 return self._save()
         return False
 
-    def rollback_consuming(self, operation_id: str, mission_id: str) -> None:
+    def rollback_consuming(self, operation_id: str, mission_id: str) -> bool:
         """
         Rollback : "consuming" → "active" si l'unwrap OpenBao a échoué.
-        Permet un retry ultérieur.
+        Retourne True si S3 OK, False si S3 fail (état mémoire corrigé,
+        S3 garde "consuming" jusqu'au prochain rechargement/timeout).
         """
         for entry in self._wraps:
             if (entry["operation_id"] == operation_id
                     and entry["mission_id"] == mission_id
                     and entry["status"] == "consuming"):
                 entry["status"] = "active"
-                self._save()
-                return
+                ok = self._save()
+                if not ok:
+                    logger.warning(
+                        "⚠️ rollback_consuming S3 fail (op=%s) — "
+                        "état mémoire: active, S3: stale-consuming",
+                        operation_id[:16],
+                    )
+                return ok
+        return False
 
     def count(self) -> int:
         return len(self._wraps)

@@ -88,7 +88,11 @@ class MissionTokenValidator:
         self._lock = threading.Lock()
 
     def _fetch_jwks_from_url(self) -> PyJWKSet:
-        """Fetch JWKS depuis l'URL avec rate-limit."""
+        """
+        Fetch JWKS depuis l'URL avec rate-limit.
+        Appelé uniquement depuis _get_jwks() qui tient le threading.Lock —
+        la fenêtre glissante est donc protégée contre les race conditions.
+        """
         now = time.monotonic()
         if now - self._refresh_window_start > 60.0:
             self._refresh_count = 0
