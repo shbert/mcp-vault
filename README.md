@@ -21,7 +21,7 @@ MCP Vault est un serveur [MCP](https://modelcontextprotocol.io/) qui fournit un 
 | Document                                                | Description                                                                                                                                                                  |
 | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [**ARCHITECTURE.md**](DESIGN/mcp-vault/ARCHITECTURE.md) | Spécification complète — vision, architecture ASGI 6 couches, vaults, SSH CA, policies MCP (6 exemples prêts à l'emploi), sécurité des clés unseal (3 facteurs), roadmap HSM |
-| [**TECHNICAL.md**](DESIGN/mcp-vault/TECHNICAL.md)       | Documentation technique — modules source (incl. PKI v0.5.0), stack ASGI 6 couches, Docker, tests, dépendances, roadmap                                                     |
+| [**TECHNICAL.md**](DESIGN/mcp-vault/TECHNICAL.md)       | Documentation technique — modules source (incl. PKI v0.5.1), stack ASGI 6 couches, Docker, tests, dépendances, roadmap                                                     |
 | [**SECURITY_AUDIT.md**](DESIGN/mcp-vault/SECURITY_AUDIT.md) | Rapport d'audit de sécurité consolidé — 60 findings V2.1, 28 corrigés, 13 résiduels documentés                                                                         |
 | [**scripts/README.md**](scripts/README.md)              | Guide CLI complet — 7 groupes de commandes, shell interactif, exemples                                                                                                       |
 | [**tests/README.md**](tests/README.md)                  | Guide d'exécution des tests — 4 niveaux, ~600 tests, commandes pour auditeurs                                                                                                |
@@ -141,6 +141,8 @@ CA souveraine pour l'écosystème : les WAF Caddy s'enrôlent via ACME exactemen
 | `pki_ca_rotate_intermediate(keep_old_issuer?, overlap_ttl?)` | admin | Rotation CA intermédiaire sans coupure |
 
 > Endpoints publics (non-auth, standard ACME/PKI) : `/acme/directory`, `/pki/ca/root.pem`, `/pki/ca/chain.pem`, `/pki/ca/crl.pem`
+>
+> **`PKI_BASE_URL`** (optionnel) : URL de base pour les CDPs et le cluster path OpenBao ACME. Vide = déduit de `MCP_ALLOWED_HOSTS`. Override test Docker : `http://mcp-vault:8030`. Doit être `http(s)://`.
 
 ### Audit (1)
 
@@ -302,7 +304,7 @@ Les clés unseal d'OpenBao sont protégées par **séparation physique à 3 fact
 
 | Version              | Approche                                                                                                            |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **v0.5.0** (actuel)  | Clés sur S3 chiffrées AES-256-GCM+AAD, mémoire seule au runtime — 60 findings audités (28 corrigés, 13 résiduels documentés) |
+| **v0.5.1** (actuel)  | Clés sur S3 chiffrées AES-256-GCM+AAD, mémoire seule au runtime — 60 findings audités (28 corrigés, 13 résiduels documentés) |
 | **v1.0**             | Transit Auto-Unseal via OpenBao dédié (KMS Cloud Temple)                                                            |
 | **v2.0**             | **Connexion HSM** (Hardware Security Module) Cloud Temple — les clés ne quittent jamais le module matériel certifié |
 
@@ -365,7 +367,7 @@ mcp-vault/
 ├── Dockerfile                # Multi-stage (OpenBao 2.5.1 + Python 3.12)
 ├── requirements.txt          # Dépendances Python
 ├── requirements.lock         # Dépendances pinnées (versions exactes)
-├── VERSION                   # 0.5.0
+├── VERSION                   # 0.5.1
 ├── DESIGN/mcp-vault/
 │   ├── ARCHITECTURE.md       # Spécification détaillée (v0.2.2-draft)
 │   ├── TECHNICAL.md          # Documentation technique (v0.4.16)
@@ -425,4 +427,4 @@ mcp-vault/
 
 ---
 
-**Licence** : Apache 2.0 | **Auteur** : Cloud Temple | **Version** : 0.5.0
+**Licence** : Apache 2.0 | **Auteur** : Cloud Temple | **Version** : 0.5.1

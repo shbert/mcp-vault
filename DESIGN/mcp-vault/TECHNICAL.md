@@ -1,7 +1,7 @@
 # Documentation Technique — MCP Vault
 
-> **Version** : 0.5.0 | **Date** : 2026-06-10 | **Auteur** : Cloud Temple
-> **Licence** : Apache 2.0 | **Statut** : ✅ Production-ready (audit V2.1 complété + PKI interne v0.5.0)
+> **Version** : 0.5.1 | **Date** : 2026-06-10 | **Auteur** : Cloud Temple
+> **Licence** : Apache 2.0 | **Statut** : ✅ Production-ready (audit V2.1 complété + PKI interne v0.5.1)
 
 ---
 
@@ -109,6 +109,7 @@ Utilise `pydantic-settings` pour charger la configuration depuis les variables d
 | `OPENBAO_CONFIG_DIR`     | `/openbao/config`         | Répertoire config HCL       |
 | `VAULT_S3_PREFIX`        | `_storage`                | Préfixe S3 pour le sync     |
 | `VAULT_S3_SYNC_INTERVAL` | `60`                      | Intervalle sync en secondes |
+| `PKI_BASE_URL`           | *(vide)*                  | Override URL base PKI (ACME directory, CDPs). Utile en test Docker : `http://mcp-vault:8030`. Doit être http(s)://. |
 
 ### 3.2 `s3_client.py` — Client S3 hybride
 
@@ -289,7 +290,7 @@ configurés pour un autre vault.
 **Suppression** : quand un vault est supprimé (`vault_delete`), le mount SSH CA
 est également supprimé. Les certificats déjà émis restent valides jusqu'à expiration.
 
-### 3.11b `vault/pki_ca.py` — PKI Certificate Authority *(v0.5.0)*
+### 3.11b `vault/pki_ca.py` — PKI Certificate Authority *(v0.5.1)*
 
 CA interne souveraine basée sur l'engine PKI d'OpenBao. CA globale (non par vault) — deux mounts réservés `_sys_pki_root/` (racine, TTL 10 ans) et `_sys_pki_int/` (intermédiaire, TTL 5 ans). Protégés contre `vault_delete` (mounts système).
 
@@ -308,7 +309,16 @@ CA interne souveraine basée sur l'engine PKI d'OpenBao. CA globale (non par vau
 
 **Sync S3 forcée** : `setup_pki_ca`, `revoke_cert`, `rotate_intermediate` appellent `upload_to_s3()` avant de retourner — la fenêtre de perte S3 est documentée comme acceptable si crash entre appel OpenBao et upload.
 
-**Middleware ACME** (`pki_middleware.py`) : couche ASGI la plus externe, proxy transparent `/acme/*` → `/v1/_sys_pki_int/acme/*` et `/pki/ca/*.pem` → OpenBao. Non-authentifié par design (RFC 8555 ACME + JWS). Anti-traversal sur acme_suffix et query_string.
+**Middleware ACME** (`pki_middleware.py`) : couche ASGI la plus externe, proxy transparent sur trois patterns :
+- `/acme/*` → `/v1/_sys_pki_int/acme/*` (URL courte user-facing)
+- `/v1/_sys_pki_int/acme/*` → idem (URL longue générée par OpenBao dans les réponses ACME directory)
+- `/pki/ca/*.pem` → endpoints CA/CRL OpenBao (lecture publique)
+
+Non-authentifié par design (RFC 8555 ACME + JWS). Anti-traversal sur acme_suffix et query_string. WAF Coraza : exclusions ciblées par regex sur les 3 paths PEM et endpoints ACME normalisés RFC 8555 (v0.5.1).
+
+**Cluster path** *(v0.5.1)* : requis par OpenBao 2.5.1 avant l'activation ACME. Configuré via `client._adapter.post("/v1/_sys_pki_int/config/cluster", json={"path": base_url + "/v1/_sys_pki_int"})` (collision paramètre `path` dans `hvac.write()`). URL déduite de `PKI_BASE_URL` (override) ou `MCP_ALLOWED_HOSTS`. **HTTPS requis pour la génération de nonces ACME** (OpenBao 2.5.1) — fonctionnel en production avec WAF TLS.
+
+**Admin REST** *(v0.5.1)* : `GET /admin/api/pki/roles` et `GET /admin/api/pki/roles/{role_name}` — info non-secrète (configuration du rôle ACME), accessible à tout token valide pour diagnostic.
 
 ### 3.12 `auth/policies.py` — Policy Store S3
 

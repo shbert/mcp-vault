@@ -1,5 +1,46 @@
 # Changelog — MCP Vault
 
+## [0.5.1] — 2026-06-10
+
+### Correctifs PKI ACME — validation en conditions réelles Docker (issue #15 T0-T10)
+
+Tests d'intégration réels : **13/13 PASS** (T0, T3a/b/c, ACME directory, T5, T6a/b/c, T9a/b, T10).
+T1/T7 (enrollment ACME) : nécessitent HTTPS sur le cluster path — fonctionnel en production avec WAF TLS.
+
+#### Fixes bloquants
+- **cluster path OpenBao ACME** : `config/cluster` désormais configuré avant `config/acme`. Appel via `client._adapter.post()` (hvac.write() a une collision de paramètre nommé `path`)
+- **WAF bloquait `/pki/ca/*.pem`** : Coraza CRS retournait 403. Exclusions ajoutées avec regex stricte (seulement les 3 fichiers PEM/CRL connus + endpoints ACME normalisés RFC 8555)
+- **CRL format** : proxy `/pki/ca/crl.pem` → `/v1/_sys_pki_int/crl/pem` (DER vs PEM)
+- **setup_pki_ca idempotent** : `try/except "issuer name already in use"` exact pour root ET intermédiaire — évite de masquer d'autres erreurs
+- **`PKI_BASE_URL` setting** : variable d'env pour override l'URL de base PKI (test Docker : `http://mcp-vault:8030`) avec validation anti-MITM
+
+#### Nouveaux endpoints admin REST
+- `GET /admin/api/pki/roles` — liste des rôles d'émission ACME
+- `GET /admin/api/pki/roles/{role_name}` — détails d'un rôle (allow_any_name, domaines, TTL)
+
+#### SPA /admin
+- Section PKI : ajout du panneau "Rôles ACME" avec détails du rôle par défaut (`acme-servers`)
+
+#### Proxy ACME étendu
+- `PkiMiddleware` gère désormais aussi `/v1/_sys_pki_int/acme/*` (URL longue générée par OpenBao dans les réponses ACME directory)
+
+#### Infrastructure de test
+- `tests/pki/` : `docker-compose.test-pki.yml`, `docker-compose.fresh-start.yml`, `test_pki_integration.sh` (T0-T10 complets)
+
+#### Corrections Codex (HAUT×3)
+- `"already in use"` restreint à `"issuer name already in use"` exact
+- WAF : `ruleEngine=Off` → `ruleRemoveById` ciblé sur regex stricte
+- `pki_base_url_validated` : ValueError si non `http(s)://` (protection MITM ACME)
+
+### Fichiers modifiés
+- `src/mcp_vault/vault/pki_ca.py` — cluster path, idempotence, `PKI_BASE_URL`
+- `src/mcp_vault/pki_middleware.py` — proxy long-path, CRL PEM
+- `src/mcp_vault/admin/api.py` — routes `/pki/roles*`
+- `src/mcp_vault/config.py` — `pki_base_url` setting validé
+- `waf/coraza.conf` — exclusions PKI/ACME regex stricte
+- `src/mcp_vault/static/js/pki.js` — panneau rôles ACME
+- `tests/pki/` *(nouveau)* — infrastructure de test T0-T10
+
 ## [0.5.0] — 2026-06-10
 
 ### PKI interne — CA OpenBao + serveur ACME (issue #15)
