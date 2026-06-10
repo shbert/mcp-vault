@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     vault_s3_prefix: str = "_storage"
     vault_s3_sync_interval: int = 60
 
+    # --- PKI ---
+    # URL publique de base pour les CDP ACME, CRL et cluster path OpenBao PKI.
+    # Si vide (défaut) : déduite automatiquement du premier FQDN non-loopback
+    # de mcp_allowed_hosts. Override utile en test Docker (ex: http://mcp-vault:8030).
+    pki_base_url: str = ""
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
     @property

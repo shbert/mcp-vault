@@ -1,0 +1,7 @@
+services:
+  mcp-vault:
+    environment:
+      VAULT_S3_PREFIX: "_storage-pki-fresh-001"
+      PKI_BASE_URL: "http://mcp-vault:8030"
+    extra_hosts:
+      - "test.lesur.lan:172.22.0.5"

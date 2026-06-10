@@ -288,6 +288,14 @@ async def _handle_admin_routes(scope, receive, send, mcp, token_info):
         body = await _read_body(receive)
         return await _api_pki_setup(send, body)
 
+    if path == "/admin/api/pki/roles" and method == "GET":
+        return await _api_pki_list_roles(send)
+
+    if path.startswith("/admin/api/pki/roles/") and method == "GET":
+        role_name = path[len("/admin/api/pki/roles/"):]
+        if role_name and "/" not in role_name:
+            return await _api_pki_role_info(send, role_name)
+
     if path == "/admin/api/pki/certs" and method == "GET":
         if not is_admin:
             return await _json_response(send, 403, {"status": "error", "message": "Permission admin requise"})
@@ -968,3 +976,17 @@ async def _api_pki_rotate(send, body):
         overlap_ttl=data.get("overlap_ttl", "48h"),
     )
     await _json_response(send, 200 if result.get("status") == "ok" else 500, result)
+
+
+async def _api_pki_list_roles(send):
+    """GET /admin/api/pki/roles — Lister les rôles d'émission PKI."""
+    from ..vault.pki_ca import list_pki_roles
+    result = await list_pki_roles()
+    await _json_response(send, 200, result)
+
+
+async def _api_pki_role_info(send, role_name: str):
+    """GET /admin/api/pki/roles/{role_name} — Détails d'un rôle PKI."""
+    from ..vault.pki_ca import get_pki_role_info
+    result = await get_pki_role_info(role_name)
+    await _json_response(send, 200 if result.get("status") == "ok" else 404, result)
