@@ -48,6 +48,7 @@ _TOOL_LABELS = {
     "pki_ca_list_roles": "Liste rôles PKI", "pki_ca_role_info": "Détails rôle PKI",
     "pki_list_certs": "Inventaire certs PKI", "pki_revoke_cert": "Révocation cert PKI",
     "pki_ca_rotate_intermediate": "Rotation intermédiaire PKI",
+    "secret_consume": "Consommation médiée (C18)",
 }
 
 def _r(tool: str, result: dict, vault_id: str = "", detail: str = "") -> dict:
@@ -557,6 +558,153 @@ async def secret_wrap_lookup(operation_id: str) -> dict:
     result = await lookup_and_revoke_by_operation_id(operation_id)
     _r("secret_wrap_lookup", result, detail=f"op={operation_id[:32]}")
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# OUTILS MCP — Consommation médiée (issue #26, anti-confused-deputy C18)
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+async def secret_consume(
+    wrap_token: str,
+    operation_id: str,
+    mission_token: str,
+) -> dict:
+    """
+    Libère un secret en validant l'identité de mission (anti-confused-deputy C18).
+
+    Chemin C18 : valide le JWT mission_token (ES256/JWKS), vérifie les bindings
+    registry (mission_id, tenant_id, aud), puis unwrap OpenBao cubbyhole.
+
+    Modes :
+    - ENFORCE_MISSION_TOKEN_VALIDATION=false (défaut, standalone) :
+        JWT validé si MISSION_JWKS_URL configuré, sinon log warning + continue.
+        Zéro impact sur les déploiements sans mcp-mission.
+    - ENFORCE_MISSION_TOKEN_VALIDATION=true (E2E) :
+        Hard-reject sur toute violation JWT ou binding.
+
+    Sécurité :
+    - wrap_token et mission_token ne sont JAMAIS loggués ni retournés
+    - Erreurs sanitisées (reason code seulement, pas de données sensibles)
+    - Anti-replay : entrée registry marquée "consumed" après succès
+
+    Args:
+        wrap_token: Token de déballage OpenBao (SENSIBLE — ne jamais loguer).
+        operation_id: Identifiant de l'opération (corrélation registry).
+        mission_token: JWT mission compact ES256 (SENSIBLE — ne jamais loguer).
+    """
+    from .vault.wrapping import consume_wrap_secret
+
+    enforce = settings.enforce_mission_token_validation
+    jwks_url = settings.mission_jwks_url
+
+    mission_id = ""
+    jwt_claims: dict = {}
+
+    # ── Validation JWT (si JWKS configuré) ──────────────────────────
+    if jwks_url:
+        try:
+            from .auth.jwt_validator import MissionTokenValidator, MissionTokenError
+
+            validator = MissionTokenValidator(
+                jwks_url=jwks_url,
+                expected_aud=settings.mission_token_aud,
+                cache_ttl=settings.mission_jwks_cache_ttl,
+                max_refresh_per_min=settings.mission_jwks_max_refresh_per_min,
+                leeway_seconds=settings.mission_token_leeway_seconds,
+            )
+            jwt_claims = validator.validate(mission_token)
+            mission_id = jwt_claims.get("mission_id", "")
+
+        except Exception as e:
+            reason = getattr(e, "reason", "jwt_validation_failed")
+            logger.warning("secret_consume JWT rejected: %s", reason)
+            if enforce:
+                return {"status": "error", "error_type": "jwt_invalid",
+                        "message": f"Mission token invalide : {reason}"}
+            # Mode non-enforced : continue sans mission_id du JWT
+            logger.warning(
+                "secret_consume : JWT invalide ignoré (ENFORCE=false) — reason=%s", reason
+            )
+
+    elif enforce:
+        # ENFORCE=true mais pas de JWKS configuré → incohérence config
+        return {"status": "error", "error_type": "misconfigured",
+                "message": "ENFORCE_MISSION_TOKEN_VALIDATION=true mais MISSION_JWKS_URL vide"}
+
+    # ── Vérification mission active (optionnel) ──────────────────────
+    if mission_id and settings.mission_status_url:
+        status_ok, status_reason = await _check_mission_active(
+            mission_id=mission_id,
+            status_url_template=settings.mission_status_url,
+            cache_ttl=settings.mission_status_cache_ttl,
+        )
+        if not status_ok:
+            logger.warning("secret_consume : mission inactive — %s", status_reason)
+            if enforce:
+                return {"status": "error", "error_type": "mission_inactive",
+                        "message": f"Mission non active : {status_reason}"}
+
+    # ── Consommation médiée ─────────────────────────────────────────
+    # mission_id depuis JWT (si disponible) ou fallback sur operation_id lookup
+    result = await consume_wrap_secret(
+        wrap_token=wrap_token,
+        operation_id=operation_id,
+        mission_id=mission_id or "",
+    )
+
+    # Audit : jamais wrap_token, jamais mission_token, jamais le secret data
+    audit_result = {
+        k: v for k, v in result.items()
+        if k not in ("data", "wrap_token")
+    }
+    _r("secret_consume", audit_result, detail=f"op={operation_id[:32]}")
+    return result
+
+
+# Cache mémoire pour les statuts de mission (évite les appels répétés)
+_mission_status_cache: dict[str, tuple[bool, float]] = {}
+# Lock créé au chargement du module — évite la race condition de création lazy
+import asyncio as _asyncio_for_lock
+_mission_status_lock = _asyncio_for_lock.Lock()
+del _asyncio_for_lock
+
+
+async def _check_mission_active(
+    mission_id: str, status_url_template: str, cache_ttl: int
+) -> tuple[bool, str]:
+    """
+    Vérifie si une mission est active auprès de mcp-mission.
+
+    Retourne (True, "") si active, (False, raison) si inactive ou erreur.
+    Fail-close : toute erreur de connexion → (False, "service_unavailable").
+    Cache TTL court (défaut 5s) pour réduire la fenêtre post-abort.
+    """
+    import time as _time
+    now = _time.time()
+    async with _mission_status_lock:
+        if mission_id in _mission_status_cache:
+            cached_ok, cached_at = _mission_status_cache[mission_id]
+            if now - cached_at < cache_ttl:
+                return cached_ok, "" if cached_ok else "mission_inactive_cached"
+
+    try:
+        import httpx
+        url = status_url_template.format(mission_id=mission_id)
+        async with httpx.AsyncClient(timeout=3.0) as http:
+            resp = await http.get(url)
+        if resp.status_code == 200:
+            body = resp.json()
+            state = body.get("status", body.get("state", ""))
+            active = state.upper() not in ("CLOSED", "ABORTED", "CLOSING", "FAILED")
+            async with _mission_status_lock:
+                _mission_status_cache[mission_id] = (active, now)
+            return active, "" if active else f"mission_status:{state}"
+        # 404 = mission inconnue → fail-close
+        return False, f"mission_status_http:{resp.status_code}"
+    except Exception as e:
+        logger.error("_check_mission_active error: %s", type(e).__name__)
+        return False, "service_unavailable"
 
 
 # ═══════════════════════════════════════════════════════════════════════
