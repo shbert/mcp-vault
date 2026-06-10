@@ -34,7 +34,7 @@ if _scripts_dir not in sys.path:
 from click.testing import CliRunner
 from cli.commands import cli
 
-runner = CliRunner(mix_stderr=False)
+runner = CliRunner()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Import des fonctions d'affichage
@@ -47,6 +47,7 @@ from cli.display import (
     show_ssh_result, show_token_result,
     show_policy_result, show_audit_result,
 )
+from cli.display import show_pki_result
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Compteurs globaux
@@ -167,3 +168,35 @@ def print_summary():
         print(f"  ❌ {FAIL} ÉCHEC(S) sur {total} tests — {PASS} OK, {FAIL} KO")
     print("=" * 70)
     print()
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  Helper mock — exécute une commande CLI avec MCPClient mocké
+# ═════════════════════════════════════════════════════════════════════════════
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+
+def run_cli_mocked(args: list, tool_response: dict):
+    """
+    Exécute une commande CLI avec MCPClient.call_tool mocké.
+
+    Permet de tester le comportement réel des commandes sans serveur :
+    vérifie que le bon outil MCP est appelé avec les bons arguments.
+
+    Args:
+        args: Arguments CLI (ex: ["vault", "create", "mon-vault"])
+        tool_response: Réponse simulée de call_tool (ex: {"status": "created", ...})
+
+    Returns:
+        (result, mock_call_tool) — result = Click Result, mock_call_tool = AsyncMock
+        Utiliser mock_call_tool.assert_called_once_with(tool_name, args_dict)
+        pour vérifier que le bon outil est appelé.
+    """
+    mock_call_tool = AsyncMock(return_value=tool_response)
+    mock_client = MagicMock()
+    mock_client.call_tool = mock_call_tool
+
+    with patch("cli.commands.MCPClient", return_value=mock_client):
+        result = run_cli(args)
+
+    return result, mock_call_tool

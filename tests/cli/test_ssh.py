@@ -1,98 +1,108 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-═══════════════════════════════════════════════════════════════
-  TEST CLI — SSH CA : setup, sign, ca-key, roles, role-info
-═══════════════════════════════════════════════════════════════
+Tests CLI SSH CA — comportementaux (non-complaisant).
+
+Vérifie que chaque commande ssh appelle le bon outil MCP avec les bons
+arguments. Utilise run_cli_mocked() qui intercepte MCPClient.call_tool.
 """
+
+import pytest
 
 from . import (
     banner, section, check, check_value, check_contains,
-    run_cli, show_ssh_result,
+    run_cli, run_cli_mocked,
 )
+
+_SSH_SETUP_OK  = {"status": "ok", "vault_id": "mon-vault", "role_name": "sre-role", "mount_point": "ssh-ca-mon-vault", "allowed_users": "deploy", "default_user": "ubuntu", "ttl": "15m"}
+_SSH_SIGNED_OK = {"status": "ok", "signed_key": "ssh-rsa-cert-v01@openssh.com AAAA...", "serial_number": "12:34", "ttl": "30m"}
+_SSH_CA_KEY_OK = {"status": "ok", "vault_id": "mon-vault", "public_key": "ssh-ed25519 AAAA...", "usage": "Ajouter dans TrustedUserCAKeys"}
+_SSH_ROLES_OK  = {"status": "ok", "vault_id": "mon-vault", "roles": ["sre-role", "dev-role"], "count": 2}
+_SSH_ROLE_INFO = {"status": "ok", "vault_id": "mon-vault", "role_name": "sre-role", "key_type": "ca", "ttl": "15m", "allowed_users": "deploy", "default_user": "ubuntu"}
 
 
 def test_ssh():
-    """Teste toutes les commandes SSH CA du CLI."""
+    """Tests comportementaux SSH CA — vérifie les appels MCPClient réels."""
 
-    banner("CLI — SSH CA (setup, sign, ca-key, roles, role-info)")
+    banner("CLI — SSH CA : tests comportementaux (non-complaisant)")
 
-    # ── ssh --help ──
-    section("Aide ssh — groupe principal")
+    # ── Aide ─────────────────────────────────────────────────────────────────
+    section("Aide ssh")
     r = run_cli(["ssh", "--help"])
     check_value("ssh --help exit code", r.exit_code, 0)
-    check_contains("Mentionne 'Certificate Authority'", r.output, "Certificate Authority")
     for subcmd in ["setup", "sign", "ca-key", "roles", "role-info"]:
-        check_contains(f"Sous-commande '{subcmd}' visible", r.output, subcmd)
+        check_contains(f"Sous-commande '{subcmd}'", r.output, subcmd)
 
-    # ── ssh setup --help ──
-    section("Aide ssh setup")
-    r = run_cli(["ssh", "setup", "--help"])
+    # ── ssh setup ────────────────────────────────────────────────────────────
+    section("ssh setup — appelle ssh_ca_setup avec tous les args")
+    r, mock = run_cli_mocked(
+        ["ssh", "setup", "mon-vault", "sre-role", "--users", "deploy", "--ttl", "15m", "--default-user", "ubuntu"],
+        _SSH_SETUP_OK,
+    )
     check_value("Exit code", r.exit_code, 0)
-    check_contains("Argument VAULT_ID", r.output, "VAULT_ID")
-    check_contains("Argument ROLE_NAME", r.output, "ROLE_NAME")
-    check_contains("Option --users", r.output, "--users")
-    check_contains("Option --ttl", r.output, "--ttl")
-    check_contains("Option --default-user", r.output, "--default-user")
+    args = mock.call_args[0][1] if mock.call_args else {}
+    check("ssh_ca_setup appelé", mock.call_args is not None and mock.call_args[0][0] == "ssh_ca_setup")
+    check_value("vault_id correct", args.get("vault_id"), "mon-vault")
+    check_value("role_name correct", args.get("role_name"), "sre-role")
+    check_value("allowed_users correct", args.get("allowed_users"), "deploy")
+    check_value("ttl correct", args.get("ttl"), "15m")
+    check_value("default_user correct", args.get("default_user"), "ubuntu")
 
-    # ── ssh sign --help ──
-    section("Aide ssh sign")
-    r = run_cli(["ssh", "sign", "--help"])
+    section("ssh setup — valeurs par défaut (sans options)")
+    r, mock = run_cli_mocked(["ssh", "setup", "mon-vault", "sre-role"], _SSH_SETUP_OK)
     check_value("Exit code", r.exit_code, 0)
-    check_contains("Option --key/-k (fichier)", r.output, "--key")
-    check_contains("Option --key-data (texte)", r.output, "--key-data")
-    check_contains("Mentionne 'certificat éphémère'", r.output, "certificat")
+    args = mock.call_args[0][1] if mock.call_args else {}
+    check_value("allowed_users défaut = '*'", args.get("allowed_users"), "*")
+    check_value("default_user défaut = 'ubuntu'", args.get("default_user"), "ubuntu")
+    check_value("ttl défaut = '30m'", args.get("ttl"), "30m")
 
-    # ── ssh ca-key --help ──
-    section("Aide ssh ca-key")
-    r = run_cli(["ssh", "ca-key", "--help"])
+    # ── ssh sign --key-data ───────────────────────────────────────────────────
+    section("ssh sign --key-data — appelle ssh_sign_key")
+    r, mock = run_cli_mocked(
+        ["ssh", "sign", "mon-vault", "sre-role", "--key-data", "ssh-ed25519 AAAA...", "--ttl", "15m"],
+        _SSH_SIGNED_OK,
+    )
     check_value("Exit code", r.exit_code, 0)
-    check_contains("Mentionne 'TrustedUserCAKeys'", r.output, "TrustedUserCAKeys")
+    args = mock.call_args[0][1] if mock.call_args else {}
+    check("ssh_sign_key appelé", mock.call_args is not None and mock.call_args[0][0] == "ssh_sign_key")
+    check_value("vault_id correct", args.get("vault_id"), "mon-vault")
+    check_value("role_name correct", args.get("role_name"), "sre-role")
+    check_value("public_key correct", args.get("public_key"), "ssh-ed25519 AAAA...")
+    check_value("ttl correct", args.get("ttl"), "15m")
 
-    # ── ssh roles --help ──
-    section("Aide ssh roles")
-    r = run_cli(["ssh", "roles", "--help"])
+    section("ssh sign sans --key ni --key-data — erreur CLI (pas d'appel MCP)")
+    r, mock = run_cli_mocked(["ssh", "sign", "mon-vault", "sre-role"], _SSH_SIGNED_OK)
+    check_value("Exit code reste 0 (erreur affichée proprement)", r.exit_code, 0)
+    check("ssh_sign_key NON appelé sans clé", not mock.called)
+
+    # ── ssh ca-key ────────────────────────────────────────────────────────────
+    section("ssh ca-key — appelle ssh_ca_public_key")
+    r, mock = run_cli_mocked(["ssh", "ca-key", "mon-vault"], _SSH_CA_KEY_OK)
     check_value("Exit code", r.exit_code, 0)
-    check_contains("Argument VAULT_ID", r.output, "VAULT_ID")
+    check("ssh_ca_public_key appelé", mock.call_args is not None and mock.call_args[0][0] == "ssh_ca_public_key")
+    check_value("vault_id correct", mock.call_args[0][1].get("vault_id") if mock.call_args else None, "mon-vault")
 
-    # ── ssh role-info --help ──
-    section("Aide ssh role-info")
-    r = run_cli(["ssh", "role-info", "--help"])
+    # ── ssh roles ────────────────────────────────────────────────────────────
+    section("ssh roles — appelle ssh_ca_list_roles")
+    r, mock = run_cli_mocked(["ssh", "roles", "mon-vault"], _SSH_ROLES_OK)
     check_value("Exit code", r.exit_code, 0)
-    check_contains("Argument ROLE_NAME", r.output, "ROLE_NAME")
+    check("ssh_ca_list_roles appelé", mock.call_args is not None and mock.call_args[0][0] == "ssh_ca_list_roles")
+    check_value("vault_id correct", mock.call_args[0][1].get("vault_id") if mock.call_args else None, "mon-vault")
 
-    # ── Affichage SSH setup ──
-    section("Affichage ssh setup")
-    print("    [simulé] :")
-    show_ssh_result({
-        "status": "ok", "vault_id": "infra", "role_name": "sre-role",
-        "mount_point": "ssh-ca-infra", "allowed_users": "deploy,admin",
-        "default_user": "ubuntu", "ttl": "15m",
-    })
-    check("ssh setup affichage OK", True)
+    # ── ssh role-info ────────────────────────────────────────────────────────
+    section("ssh role-info — appelle ssh_ca_role_info avec vault_id + role_name")
+    r, mock = run_cli_mocked(["ssh", "role-info", "mon-vault", "sre-role"], _SSH_ROLE_INFO)
+    check_value("Exit code", r.exit_code, 0)
+    args = mock.call_args[0][1] if mock.call_args else {}
+    check("ssh_ca_role_info appelé", mock.call_args is not None and mock.call_args[0][0] == "ssh_ca_role_info")
+    check_value("vault_id correct", args.get("vault_id"), "mon-vault")
+    check_value("role_name correct", args.get("role_name"), "sre-role")
 
-    # ── Affichage SSH roles ──
-    section("Affichage ssh roles")
-    print("    [simulé] :")
-    show_ssh_result({"status": "ok", "vault_id": "infra", "count": 2, "roles": ["sre-role", "dev-role"]})
-    check("ssh roles affichage OK", True)
-
-    # ── Affichage SSH role-info ──
-    section("Affichage ssh role-info")
-    print("    [simulé] :")
-    show_ssh_result({
-        "status": "ok", "vault_id": "infra", "role_name": "sre-role",
-        "key_type": "ca", "ttl": "900", "max_ttl": "3600",
-        "default_user": "ubuntu", "allowed_users": "deploy,admin",
-        "allowed_extensions": "", "allow_user_certificates": True, "allow_host_certificates": False,
-    })
-    check("ssh role-info affichage OK", True)
-
-    # ── Affichage SSH ca-key ──
-    section("Affichage ssh ca-key")
-    print("    [simulé] :")
-    show_ssh_result({
-        "status": "ok", "ca_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFake...",
-        "usage": "Ajouter à TrustedUserCAKeys dans sshd_config",
-    })
-    check("ssh ca-key affichage OK", True)
+    # ── Erreur propagée ───────────────────────────────────────────────────────
+    section("ssh ca-key — erreur serveur propagée sans crash CLI")
+    r, mock = run_cli_mocked(
+        ["ssh", "ca-key", "vault-inexistant"],
+        {"status": "error", "message": "Vault non trouvé"},
+    )
+    check_value("Exit code 0 même en erreur", r.exit_code, 0)
+    check("ssh_ca_public_key bien appelé", mock.called)
