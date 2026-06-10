@@ -1,6 +1,6 @@
 # Documentation Technique — MCP Vault
 
-> **Version** : 0.5.1 | **Date** : 2026-06-10 | **Auteur** : Cloud Temple
+> **Version** : 0.6.0 | **Date** : 2026-06-10 | **Auteur** : Cloud Temple
 > **Licence** : Apache 2.0 | **Statut** : ✅ Production-ready (audit V2.1 complété + PKI interne v0.5.1)
 
 ---
@@ -48,7 +48,7 @@ MCP Vault est un serveur MCP (Model Context Protocol) qui fournit une gestion s�
 │  │  HealthCheckMiddleware → /health, /healthz, /ready       │  │
 │  │  AuthMiddleware     → Bearer token → contextvars         │  │
 │  │  LoggingMiddleware  → stderr + ring buffer (200 entrées) │  │
-│  │  FastMCP            → /mcp (Streamable HTTP, 31 outils)  │  │
+│  │  FastMCP            → /mcp (Streamable HTTP, 32 outils)  │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                                                                │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
@@ -319,6 +319,20 @@ Non-authentifié par design (RFC 8555 ACME + JWS). Anti-traversal sur acme_suffi
 **Cluster path** *(v0.5.1)* : requis par OpenBao 2.5.1 avant l'activation ACME. Configuré via `client._adapter.post("/v1/_sys_pki_int/config/cluster", json={"path": base_url + "/v1/_sys_pki_int"})` (collision paramètre `path` dans `hvac.write()`). URL déduite de `PKI_BASE_URL` (override) ou `MCP_ALLOWED_HOSTS`. **HTTPS requis pour la génération de nonces ACME** (OpenBao 2.5.1) — fonctionnel en production avec WAF TLS.
 
 **Admin REST** *(v0.5.1)* : `GET /admin/api/pki/roles` et `GET /admin/api/pki/roles/{role_name}` — info non-secrète (configuration du rôle ACME), accessible à tout token valide pour diagnostic.
+
+### 3.11c `auth/jwt_validator.py` — Validateur JWT mission_token *(v0.6.0)*
+
+Validation JWT ES256/JWKS pour l'anti-confused-deputy C18 (issue #26).
+
+| Classe/Fonction | Description |
+| --- | --- |
+| `MissionTokenValidator(jwks_url, expected_aud, cache_ttl, ...)` | Validateur thread-safe. Cache JWKS TTL-borné (60s), refresh kid inconnu, rate-limit 3/min |
+| `validate(token_compact)` → dict | ES256, iss=mcp-mission, aud, exp+leeway, mission_id requis. Jamais le token dans les erreurs. |
+| `MissionTokenError(reason)` | reason = code machine ("invalid_signature", "token_expired", "kid_unknown_or_revoked"...) |
+
+**Thread-safety** : `threading.Lock` protège le cache JWKS et la fenêtre glissante du rate-limit. `_fetch_jwks_from_url()` est toujours appelé sous ce lock.
+
+**Standalone** : si `MISSION_JWKS_URL` est vide, le validateur n'est pas instancié et `secret_consume` fonctionne en mode non-enforced.
 
 ### 3.12 `auth/policies.py` — Policy Store S3
 

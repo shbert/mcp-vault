@@ -26,7 +26,7 @@ SHELL_COMMANDS = {
     "about":      "Informations sur le service",
     "whoami":     "Identité du token courant (nom, permissions, vaults)",
     "vault":      "vault <op> [args] — create, list, info, update, delete",
-    "secret":     "secret <op> <vault> [args] — write, read, list, delete",
+    "secret":     "secret <op> <vault> [args] — write, read, list, delete, consume",
     "types":      "Lister les 14 types de secrets",
     "password":   "password [length] — Générer un mot de passe CSPRNG",
     "ssh":        "ssh <op> <vault> [args] — setup, sign, ca-key, roles, role-info",
@@ -128,7 +128,7 @@ async def cmd_vault(client, args="", json_output=False):
         show_vault_result(result)
 
 
-SECRET_OPS = ("write", "read", "list", "delete")
+SECRET_OPS = ("write", "read", "list", "delete", "consume")
 
 
 async def cmd_secret(client, args="", json_output=False):
@@ -183,6 +183,13 @@ async def cmd_secret(client, args="", json_output=False):
     elif op == "delete" and len(parts) >= 3:
         result = await client.call_tool("secret_delete", {
             "vault_id": parts[1], "path": parts[2],
+        })
+    elif op == "consume" and len(parts) >= 4:
+        # secret consume <wrap_token> <operation_id> <mission_token>
+        result = await client.call_tool("secret_consume", {
+            "wrap_token": parts[1],
+            "operation_id": parts[2],
+            "mission_token": parts[3],
         })
     else:
         show_warning(f"Usage: secret {op} <vault> <path>")

@@ -386,6 +386,42 @@ def secret_password_cmd(ctx, length, no_symbols, no_uppercase, exclude, output_j
     asyncio.run(_run())
 
 
+@secret_group.command("consume")
+@click.argument("wrap_token")
+@click.argument("operation_id")
+@click.argument("mission_token")
+@click.option("--json", "-j", "output_json", is_flag=True, help="Sortie JSON brute")
+@click.pass_context
+def secret_consume_cmd(ctx, wrap_token, operation_id, mission_token, output_json):
+    """Libérer un secret via wrap_token avec validation JWT (anti-confused-deputy C18).
+
+    \b
+    WRAP_TOKEN    : Token de déballage OpenBao (SENSIBLE)
+    OPERATION_ID  : Identifiant de l'opération (corrélation registry)
+    MISSION_TOKEN : JWT mission_token ES256 (SENSIBLE)
+
+    \b
+    Mode standalone (ENFORCE=false) : validation JWT si MISSION_JWKS_URL configuré,
+    sinon continue sans validation. Zéro impact sur les déploiements sans mcp-mission.
+
+    \b
+    Exemples :
+      secret consume <wrap_token> <operation_id> <mission_token>
+    """
+    async def _run():
+        client = MCPClient(ctx.obj["url"], ctx.obj["token"])
+        result = await client.call_tool("secret_consume", {
+            "wrap_token": wrap_token,
+            "operation_id": operation_id,
+            "mission_token": mission_token,
+        })
+        if output_json:
+            show_json(result)
+        else:
+            show_secret_result(result)
+    asyncio.run(_run())
+
+
 # =============================================================================
 # SSH CA (groupe)
 # =============================================================================
