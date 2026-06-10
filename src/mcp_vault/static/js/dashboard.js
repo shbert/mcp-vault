@@ -15,7 +15,7 @@ async function loadDashboard() {
     const [health, vaults, tokens, policies] = await Promise.all(promises);
 
     const vc = vaults.count || 0;
-    const tc = (tokens.tokens || []).filter(t => !t.revoked).length;
+    const tc = (tokens.tokens || []).filter(t => !t.revoked && !t.expired).length;
     const sc = (vaults.vaults || []).reduce((s, v) => s + (v.secrets_count || 0), 0);
     const pc = policies ? (policies.policies || []).length : 0;
 
