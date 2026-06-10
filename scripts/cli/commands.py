@@ -387,26 +387,30 @@ def secret_password_cmd(ctx, length, no_symbols, no_uppercase, exclude, output_j
 
 
 @secret_group.command("consume")
-@click.argument("wrap_token")
 @click.argument("operation_id")
-@click.argument("mission_token")
+@click.option("--wrap-token", "wrap_token",
+              envvar="VAULT_WRAP_TOKEN", required=True,
+              help="Token de déballage OpenBao (SENSIBLE — utiliser VAULT_WRAP_TOKEN)")
+@click.option("--mission-token", "mission_token",
+              envvar="VAULT_MISSION_TOKEN", default="",
+              help="JWT mission_token ES256 (SENSIBLE — utiliser VAULT_MISSION_TOKEN)")
 @click.option("--json", "-j", "output_json", is_flag=True, help="Sortie JSON brute")
 @click.pass_context
-def secret_consume_cmd(ctx, wrap_token, operation_id, mission_token, output_json):
+def secret_consume_cmd(ctx, operation_id, wrap_token, mission_token, output_json):
     """Libérer un secret via wrap_token avec validation JWT (anti-confused-deputy C18).
 
     \b
-    WRAP_TOKEN    : Token de déballage OpenBao (SENSIBLE)
-    OPERATION_ID  : Identifiant de l'opération (corrélation registry)
-    MISSION_TOKEN : JWT mission_token ES256 (SENSIBLE)
+    OPERATION_ID : Identifiant de l'opération (corrélation registry)
 
     \b
-    Mode standalone (ENFORCE=false) : validation JWT si MISSION_JWKS_URL configuré,
-    sinon continue sans validation. Zéro impact sur les déploiements sans mcp-mission.
+    Tokens sensibles passés via variables d'environnement (pas dans l'historique bash) :
+      VAULT_WRAP_TOKEN    = token de déballage OpenBao (single-use)
+      VAULT_MISSION_TOKEN = JWT mission_token ES256 (si mcp-mission configuré)
 
     \b
     Exemples :
-      secret consume <wrap_token> <operation_id> <mission_token>
+      VAULT_WRAP_TOKEN=hvs.CAES... mcp-vault secret consume op-123
+      VAULT_WRAP_TOKEN=... VAULT_MISSION_TOKEN=eyJ... mcp-vault secret consume op-123
     """
     async def _run():
         client = MCPClient(ctx.obj["url"], ctx.obj["token"])

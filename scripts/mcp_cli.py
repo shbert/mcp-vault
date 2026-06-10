@@ -10,7 +10,7 @@ Usage :
     python scripts/mcp_cli.py vault list
     python scripts/mcp_cli.py secret write myvault test/key --data '{"user":"me"}'
     python scripts/mcp_cli.py pki setup --lab --domains '*.lesur.lan,lesur.lan'
-    python scripts/mcp_cli.py secret consume <wrap_token> <operation_id> <mission_token>
+    VAULT_WRAP_TOKEN=hvs.CAES... python scripts/mcp_cli.py secret consume <operation_id>
     python scripts/mcp_cli.py pki ca-key
     python scripts/mcp_cli.py pki certs
     python scripts/mcp_cli.py shell

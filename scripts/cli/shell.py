@@ -184,12 +184,19 @@ async def cmd_secret(client, args="", json_output=False):
         result = await client.call_tool("secret_delete", {
             "vault_id": parts[1], "path": parts[2],
         })
-    elif op == "consume" and len(parts) >= 4:
-        # secret consume <wrap_token> <operation_id> <mission_token>
+    elif op == "consume" and len(parts) >= 2:
+        # secret consume <operation_id>
+        # Tokens sensibles depuis les variables d'environnement (pas dans l'historique)
+        import os
+        wrap_token_val = os.environ.get("VAULT_WRAP_TOKEN", "")
+        mission_token_val = os.environ.get("VAULT_MISSION_TOKEN", "")
+        if not wrap_token_val:
+            show_error("VAULT_WRAP_TOKEN non défini (export VAULT_WRAP_TOKEN=...)")
+            return
         result = await client.call_tool("secret_consume", {
-            "wrap_token": parts[1],
-            "operation_id": parts[2],
-            "mission_token": parts[3],
+            "wrap_token": wrap_token_val,
+            "operation_id": parts[1],
+            "mission_token": mission_token_val,
         })
     else:
         show_warning(f"Usage: secret {op} <vault> <path>")
