@@ -366,6 +366,7 @@ async def delete_space(vault_id: str) -> dict:
     # SÉCURITÉ PKI : les mounts _sys_pki_* sont hors du cycle de vie vault_delete
     from .pki_ca import is_reserved_mount
     if is_reserved_mount(vault_id):
+        logger.warning(f"⚠️ Tentative de suppression du mount PKI protégé '{vault_id}' bloquée (spaces.delete_space)")
         return {
             "status": "error",
             "error": "reserved_mount",

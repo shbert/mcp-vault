@@ -301,9 +301,10 @@ async def vault_delete(vault_id: str, confirm: bool = False) -> dict:
     if not confirm:
         return {"status": "error", "message": "confirm=True requis pour supprimer un vault"}
 
-    # SÉCURITÉ PKI : double guard (spaces.py en fait de même, défense en profondeur)
+    # SÉCURITÉ PKI : double guard défense en profondeur (spaces.py aussi vérifie)
     from .vault.pki_ca import is_reserved_mount
     if is_reserved_mount(vault_id):
+        logger.warning(f"⚠️ Tentative de suppression du mount PKI protégé '{vault_id}' bloquée (vault_delete MCP tool)")
         return {"status": "error", "error": "reserved_mount",
                 "message": f"'{vault_id}' est un mount système PKI protégé et ne peut pas être supprimé."}
 

@@ -226,6 +226,32 @@ class TestPkiMiddleware:
 
         assert inner_called, "Les routes non-PKI doivent passer au middleware suivant"
 
+    def test_acme_path_traversal_rejected(self):
+        """GET /acme/../../admin → rejeté 400 (CRITIQUE anti-traversal)."""
+        from mcp_vault.pki_middleware import PkiMiddleware
+
+        middleware = PkiMiddleware(MagicMock())
+        scope = self._make_scope("/acme/../../admin/creds")
+        send_fn, events = self._make_send()
+
+        _run(middleware(scope, self._make_receive(), send_fn))
+
+        start_event = next(e for e in events if e["type"] == "http.response.start")
+        assert start_event["status"] == 400
+
+    def test_acme_double_slash_rejected(self):
+        """GET /acme//bypass → rejeté 400."""
+        from mcp_vault.pki_middleware import PkiMiddleware
+
+        middleware = PkiMiddleware(MagicMock())
+        scope = self._make_scope("/acme//bypass")
+        send_fn, events = self._make_send()
+
+        _run(middleware(scope, self._make_receive(), send_fn))
+
+        start_event = next(e for e in events if e["type"] == "http.response.start")
+        assert start_event["status"] == 400
+
     def test_acme_proxy_returns_502_on_openbao_down(self):
         """Si OpenBao est injoignable, le middleware retourne 502."""
         from mcp_vault.pki_middleware import PkiMiddleware
@@ -356,6 +382,27 @@ class TestS3SyncAfterMutations:
         from mcp_vault.vault.pki_ca import revoke_cert
         result = _run(revoke_cert(""))
         assert result["status"] == "error"
+
+    def test_revoke_rejects_invalid_serial_format(self):
+        """revoke_cert() avec serial_number invalide (injection possible) retourne error."""
+        from mcp_vault.vault.pki_ca import revoke_cert
+        for bad_serial in ["../../admin", "12:34:ab:cd; evil", "GGGG", "12345"]:
+            result = _run(revoke_cert(bad_serial))
+            assert result["status"] == "error", f"Attendu error pour {bad_serial!r}"
+
+    def test_revoke_accepts_valid_serial(self):
+        """revoke_cert() avec serial valide (hex:hex:...) passe la validation."""
+        from mcp_vault.vault.pki_ca import revoke_cert
+
+        mock_client = MagicMock()
+        mock_client.write = MagicMock(return_value={"data": {"revocation_time": 1234567890}})
+
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=mock_client), \
+             patch("mcp_vault.s3_sync.upload_to_s3", new_callable=AsyncMock, return_value=True), \
+             patch("mcp_vault.vault.pki_ca.is_pki_initialized", return_value=True):
+            result = _run(revoke_cert("12:34:ab:cd:ef:12"))
+
+        assert result["status"] == "ok"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

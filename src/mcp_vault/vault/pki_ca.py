@@ -13,7 +13,9 @@ Sync S3 forcée après toute mutation critique (setup, rotate, revoke)
 pour éviter la perte d'inventaire/révocation lors d'un crash.
 """
 
+import asyncio
 import logging
+import re
 from typing import Optional
 
 import httpx
@@ -30,6 +32,25 @@ _ACME_ROLE_NAME = "acme-servers"
 
 # Préfixe protégé — utilisé dans spaces.py et server.py pour refuser vault_delete
 RESERVED_MOUNT_PREFIX = "_sys_pki_"
+
+# SÉCURITÉ : regex de validation du serial_number (hex séparé par colons)
+_SERIAL_NUMBER_PATTERN = re.compile(r'^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2})+$')
+
+# SÉCURITÉ : regex de validation des domaines ACME (FQDN ou wildcard *.domain.tld)
+_DOMAIN_PATTERN = re.compile(
+    r'^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?'
+    r'(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'
+)
+
+# Lock global pour serialiser les appels à setup_pki_ca (idempotence + race condition)
+_PKI_SETUP_LOCK: Optional[asyncio.Lock] = None
+
+
+def _get_setup_lock() -> asyncio.Lock:
+    global _PKI_SETUP_LOCK
+    if _PKI_SETUP_LOCK is None:
+        _PKI_SETUP_LOCK = asyncio.Lock()
+    return _PKI_SETUP_LOCK
 
 
 def _get_hvac_client():
@@ -61,13 +82,19 @@ async def _read_pem_url(path: str) -> str:
     Lit un endpoint PKI OpenBao retournant du texte PEM brut (non-JSON).
 
     Les endpoints /ca/pem, /ca_chain, /crl sont unauthenticated dans PKI engine.
+    Valide que la réponse est du PEM avant de la retourner (sauf CRL — format DER/PEM distinct).
     """
     settings = get_settings()
     url = f"{settings.openbao_addr}/v1/{path}"
     async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(url, follow_redirects=True)
+        resp = await client.get(url, follow_redirects=False)
         resp.raise_for_status()
-        return resp.text
+
+    # Validation minimale : le contenu doit commencer par un header PEM
+    text = resp.text
+    if not text.strip().startswith("-----BEGIN "):
+        raise ValueError(f"Réponse OpenBao non-PEM pour {path} : {text[:80]!r}")
+    return text
 
 
 def is_pki_initialized() -> bool:
@@ -89,7 +116,15 @@ def _base_url() -> str:
     hosts = settings.allowed_hosts_list
     loopback = {"127.0.0.1", "localhost", "::1"}
     fqdn = next((h for h in hosts if h not in loopback), None)
-    return f"https://{fqdn}" if fqdn else "http://localhost:8080"
+    if not fqdn:
+        # MOYEN : les CDP et URLs ACME seront localhost — non-routables pour clients externes
+        logger.warning(
+            "⚠️ PKI : aucun FQDN public dans MCP_ALLOWED_HOSTS — "
+            "les CDPs et URLs ACME utiliseront localhost (invalides en prod). "
+            "Configurer MCP_ALLOWED_HOSTS avec le FQDN public."
+        )
+        return "http://localhost:8080"
+    return f"https://{fqdn}"
 
 
 def _mount_pki_engine(client, mount: str, max_ttl: str) -> None:
@@ -124,130 +159,141 @@ async def setup_pki_ca(lab_mode: bool = True,
     if not allowed_domains:
         return {"status": "error", "message": "allowed_domains requis"}
 
+    # MOYEN : validation du format des domaines autorisés (FQDN ou wildcard *.domain.tld)
+    for domain in allowed_domains:
+        if not _DOMAIN_PATTERN.match(domain.strip()):
+            return {"status": "error", "message": f"Domaine invalide : '{domain}' (format FQDN requis)"}
+
     client = _get_hvac_client()
     if not client:
         return {"status": "error", "message": "OpenBao non connecté"}
 
     base = _base_url()
 
-    try:
-        # ── 1. CA Racine ────────────────────────────────────────────────
-        _mount_pki_engine(client, _ROOT_MOUNT, "87600h")
+    # ÉLEVÉ : lock global pour éviter les race conditions si setup_pki_ca est appelé en parallèle
+    async with _get_setup_lock():
+        try:
+            # ── 1. CA Racine ────────────────────────────────────────────────
+            _mount_pki_engine(client, _ROOT_MOUNT, "87600h")
 
-        root_resp = client.write(
-            f"{_ROOT_MOUNT}/root/generate/internal",
-            common_name="MCP Vault Root CA",
-            ttl="87600h",
-            key_type="rsa",
-            key_bits=4096,
-            issuer_name="mcp-vault-root",
-        )
-        root_cert_pem = root_resp.get("data", {}).get("certificate", "") if root_resp else ""
+            root_resp = client.write(
+                f"{_ROOT_MOUNT}/root/generate/internal",
+                common_name="MCP Vault Root CA",
+                ttl="87600h",
+                key_type="rsa",
+                key_bits=4096,
+                issuer_name="mcp-vault-root",
+            )
+            root_cert_pem = root_resp.get("data", {}).get("certificate", "") if root_resp else ""
 
-        client.write(
-            f"{_ROOT_MOUNT}/config/urls",
-            issuing_certificates=[f"{base}/pki/ca/root.pem"],
-            crl_distribution_points=[f"{base}/pki/ca/crl.pem"],
-        )
-        logger.info("✅ CA racine PKI configurée")
+            client.write(
+                f"{_ROOT_MOUNT}/config/urls",
+                issuing_certificates=[f"{base}/pki/ca/root.pem"],
+                crl_distribution_points=[f"{base}/pki/ca/crl.pem"],
+            )
+            logger.info("✅ CA racine PKI configurée")
 
-        # ── 2. CA Intermédiaire ─────────────────────────────────────────
-        _mount_pki_engine(client, _INT_MOUNT, "43800h")
+            # ── 2. CA Intermédiaire ─────────────────────────────────────────
+            _mount_pki_engine(client, _INT_MOUNT, "43800h")
 
-        csr_resp = client.write(
-            f"{_INT_MOUNT}/intermediate/generate/internal",
-            common_name="MCP Vault Intermediate CA",
-            ttl="43800h",
-            key_type="rsa",
-            key_bits=4096,
-            issuer_name="mcp-vault-int",
-            add_basic_constraints=True,
-        )
-        csr = csr_resp["data"]["csr"]
+            csr_resp = client.write(
+                f"{_INT_MOUNT}/intermediate/generate/internal",
+                common_name="MCP Vault Intermediate CA",
+                ttl="43800h",
+                key_type="rsa",
+                key_bits=4096,
+                issuer_name="mcp-vault-int",
+                add_basic_constraints=True,
+            )
+            csr = csr_resp["data"]["csr"]
 
-        sign_resp = client.write(
-            f"{_ROOT_MOUNT}/root/sign-intermediate",
-            csr=csr,
-            format="pem_bundle",
-            ttl="43800h",
-            issuer_ref="mcp-vault-root",
-        )
-        signed_cert = sign_resp["data"]["certificate"]
+            sign_resp = client.write(
+                f"{_ROOT_MOUNT}/root/sign-intermediate",
+                csr=csr,
+                format="pem_bundle",
+                ttl="43800h",
+                issuer_ref="mcp-vault-root",
+            )
+            signed_cert = sign_resp["data"]["certificate"]
 
-        import_resp = client.write(
-            f"{_INT_MOUNT}/intermediate/set-signed",
-            certificate=signed_cert,
-        )
-        imported_issuers = import_resp.get("data", {}).get("imported_issuers", []) if import_resp else []
-        new_issuer_id = imported_issuers[0] if imported_issuers else ""
+            import_resp = client.write(
+                f"{_INT_MOUNT}/intermediate/set-signed",
+                certificate=signed_cert,
+            )
+            imported_issuers = import_resp.get("data", {}).get("imported_issuers", []) if import_resp else []
+            new_issuer_id = imported_issuers[0] if imported_issuers else ""
 
-        if new_issuer_id:
-            client.write(f"{_INT_MOUNT}/config/issuers", default=new_issuer_id)
+            if new_issuer_id:
+                client.write(f"{_INT_MOUNT}/config/issuers", default=new_issuer_id)
 
-        client.write(
-            f"{_INT_MOUNT}/config/urls",
-            issuing_certificates=[f"{base}/pki/ca/chain.pem"],
-            crl_distribution_points=[f"{base}/pki/ca/crl.pem"],
-        )
-        logger.info("✅ CA intermédiaire PKI configurée")
+            client.write(
+                f"{_INT_MOUNT}/config/urls",
+                issuing_certificates=[f"{base}/pki/ca/chain.pem"],
+                crl_distribution_points=[f"{base}/pki/ca/crl.pem"],
+            )
+            logger.info("✅ CA intermédiaire PKI configurée")
 
-        # ── 3. Rôle d'émission ACME ─────────────────────────────────────
-        client.write(
-            f"{_INT_MOUNT}/roles/{_ACME_ROLE_NAME}",
-            server_flag=True,
-            client_flag=False,
-            allow_any_name=False,
-            allow_localhost=False,
-            allow_ip_sans=False,
-            allowed_domains=allowed_domains,
-            allow_subdomains=True,
-            allow_wildcard_certificates=True,
-            enforce_hostnames=True,
-            max_ttl=leaf_ttl,
-            no_store=False,
-            key_type="rsa",
-            key_bits=2048,
-            require_cn=False,
-        )
-        logger.info(f"✅ Rôle ACME '{_ACME_ROLE_NAME}' configuré pour {allowed_domains}")
+            # ── 3. Rôle d'émission ACME ─────────────────────────────────────
+            client.write(
+                f"{_INT_MOUNT}/roles/{_ACME_ROLE_NAME}",
+                server_flag=True,
+                client_flag=False,
+                allow_any_name=False,
+                allow_localhost=False,
+                allow_ip_sans=False,
+                allowed_domains=allowed_domains,
+                allow_subdomains=True,
+                allow_wildcard_certificates=True,
+                enforce_hostnames=True,
+                max_ttl=leaf_ttl,
+                no_store=False,
+                key_type="rsa",
+                key_bits=2048,
+                require_cn=False,
+            )
+            logger.info(f"✅ Rôle ACME '{_ACME_ROLE_NAME}' configuré pour {allowed_domains}")
 
-        # ── 4. Serveur ACME ─────────────────────────────────────────────
-        client.write(
-            f"{_INT_MOUNT}/config/acme",
-            enabled=True,
-            default_directory_policy=f"role:{_ACME_ROLE_NAME}",
-            allowed_roles=[_ACME_ROLE_NAME],
-            allowed_issuers=["*"],
-            eab_policy="not-required" if lab_mode else "required",
-        )
-        logger.info("✅ Serveur ACME activé")
+            # ── 4. Serveur ACME ─────────────────────────────────────────────
+            client.write(
+                f"{_INT_MOUNT}/config/acme",
+                enabled=True,
+                default_directory_policy=f"role:{_ACME_ROLE_NAME}",
+                allowed_roles=[_ACME_ROLE_NAME],
+                allowed_issuers=["*"],
+                eab_policy="not-required" if lab_mode else "required",
+            )
+            logger.info("✅ Serveur ACME activé")
 
-        # ── 5. Sync S3 forcée ───────────────────────────────────────────
-        from ..s3_sync import upload_to_s3
-        await upload_to_s3()
-        logger.info("✅ Sync S3 forcée après setup PKI")
+            # ── 5. Sync S3 forcée ───────────────────────────────────────────
+            from ..s3_sync import upload_to_s3
+            sync_ok = await upload_to_s3()
+            if not sync_ok:
+                logger.error("❌ Sync S3 échouée après setup PKI — durabilité CA compromise")
+            else:
+                logger.info("✅ Sync S3 OK après setup PKI")
 
-        root_expiry = _cert_expiry_iso(root_cert_pem) if root_cert_pem else "inconnu"
-        root_fp = _sha256_fingerprint(root_cert_pem) if root_cert_pem else ""
+            root_expiry = _cert_expiry_iso(root_cert_pem) if root_cert_pem else "inconnu"
+            root_fp = _sha256_fingerprint(root_cert_pem) if root_cert_pem else ""
 
-        return {
-            "status": "ok",
-            "lab_mode": lab_mode,
-            "root_mount": _ROOT_MOUNT,
-            "int_mount": _INT_MOUNT,
-            "acme_directory": f"{base}/acme/directory",
-            "root_pem_url": f"{base}/pki/ca/root.pem",
-            "chain_pem_url": f"{base}/pki/ca/chain.pem",
-            "crl_url": f"{base}/pki/ca/crl.pem",
-            "root_expires": root_expiry,
-            "root_fingerprint_sha256": root_fp,
-            "allowed_domains": allowed_domains,
-            "leaf_ttl": leaf_ttl,
-            "eab_required": not lab_mode,
-        }
-    except Exception as e:
-        logger.error(f"❌ Erreur setup PKI CA : {e}")
-        return {"status": "error", "message": str(e)}
+            return {
+                "status": "ok",
+                "lab_mode": lab_mode,
+                "root_mount": _ROOT_MOUNT,
+                "int_mount": _INT_MOUNT,
+                "acme_directory": f"{base}/acme/directory",
+                "root_pem_url": f"{base}/pki/ca/root.pem",
+                "chain_pem_url": f"{base}/pki/ca/chain.pem",
+                "crl_url": f"{base}/pki/ca/crl.pem",
+                "root_expires": root_expiry,
+                "root_fingerprint_sha256": root_fp,
+                "allowed_domains": allowed_domains,
+                "leaf_ttl": leaf_ttl,
+                "eab_required": not lab_mode,
+                "s3_sync_ok": sync_ok,
+            }
+        except Exception as e:
+            logger.error(f"❌ Erreur setup PKI CA : {e}")
+            return {"status": "error", "message": str(e)}
 
 
 async def get_ca_root_pem() -> dict:
@@ -448,6 +494,9 @@ async def revoke_cert(serial_number: str) -> dict:
     """
     if not serial_number:
         return {"status": "error", "message": "serial_number requis"}
+    # CRITIQUE : validation stricte du serial_number (format hex:xx:xx)
+    if not _SERIAL_NUMBER_PATTERN.match(serial_number.strip()):
+        return {"status": "error", "message": "serial_number invalide (format attendu : aa:bb:cc:...)"}
     if not is_pki_initialized():
         return {"status": "error", "message": "PKI non initialisée"}
 
@@ -458,14 +507,16 @@ async def revoke_cert(serial_number: str) -> dict:
     try:
         revoke_resp = client.write(
             f"{_INT_MOUNT}/revoke",
-            serial_number=serial_number,
+            serial_number=serial_number.strip(),
         )
         rev_time = revoke_resp.get("data", {}).get("revocation_time", 0) if revoke_resp else 0
 
         client.write(f"{_INT_MOUNT}/crl/rotate")
 
         from ..s3_sync import upload_to_s3
-        await upload_to_s3()
+        sync_ok = await upload_to_s3()
+        if not sync_ok:
+            logger.error(f"❌ Sync S3 échouée après révocation {serial_number} — CRL peut être obsolète en S3")
 
         logger.info(f"✅ Cert révoqué et CRL mise à jour : {serial_number}")
         return {
@@ -473,6 +524,7 @@ async def revoke_cert(serial_number: str) -> dict:
             "serial_number": serial_number,
             "revocation_time": rev_time,
             "crl_updated": True,
+            "s3_sync_ok": sync_ok,
         }
     except Exception as e:
         logger.error(f"❌ Erreur révocation cert {serial_number} : {e}")
@@ -537,7 +589,9 @@ async def rotate_intermediate(keep_old_issuer: bool = True,
                 logger.warning(f"⚠️ Impossible de supprimer l'ancien issuer {old_default_id} : {e}")
 
         from ..s3_sync import upload_to_s3
-        await upload_to_s3()
+        sync_ok = await upload_to_s3()
+        if not sync_ok:
+            logger.error("❌ Sync S3 échouée après rotation intermédiaire — durabilité compromise")
 
         try:
             new_pem = await _read_pem_url(f"{_INT_MOUNT}/ca/pem")
@@ -552,6 +606,7 @@ async def rotate_intermediate(keep_old_issuer: bool = True,
             "new_expires": new_expires,
             "keep_old_issuer": keep_old_issuer,
             "overlap_ttl": overlap_ttl,
+            "s3_sync_ok": sync_ok,
         }
     except Exception as e:
         logger.error(f"❌ Erreur rotation intermédiaire PKI : {e}")

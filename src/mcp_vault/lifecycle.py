@@ -91,7 +91,7 @@ async def vault_startup() -> bool:
         else:
             logger.info("ℹ️  PKI CA non initialisée — utilisez pki_ca_setup pour démarrer.")
     except Exception as e:
-        logger.warning(f"⚠️ PKI CA check : {e}")
+        logger.error(f"❌ PKI CA check échoué : {e} — la PKI sera indisponible jusqu'à correction")
 
     # ── 2. Vérifier les données locales (Docker volume) ───────────
     data_dir = Path(settings.openbao_data_dir)

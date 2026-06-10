@@ -5,14 +5,24 @@ PkiMiddleware ASGI — Proxy non-authentifié pour les endpoints PKI/ACME.
 Intercepte AVANT le middleware d'auth MCP (couche la plus externe dans create_app).
 Ces routes sont délibérément non-authentifiées : c'est le standard PKI/ACME.
 
+SÉCURITÉ :
+  - Les endpoints ACME utilisent JWS (RFC 8555) pour l'authentification des clients.
+    Il n'y a PAS de CSRF car l'API ACME n'est pas appelée par des navigateurs avec
+    des cookies/sessions. La protection réseau est assurée par le WAF en amont.
+  - Les paths ACME sont validés anti-traversal (pas de /../..) avant forwarding.
+  - Les query strings sont validés avant forwarding.
+  - follow_redirects=False : pas de SSRF via redirections OpenBao.
+
 Routes interceptées :
-    /acme/*        → proxy transparent vers OpenBao /v1/_sys_pki_int/acme/*
+    /acme/*        → proxy vers OpenBao /v1/_sys_pki_int/acme/*
     /pki/ca/root.pem  → OpenBao /v1/_sys_pki_root/ca/pem
     /pki/ca/chain.pem → OpenBao /v1/_sys_pki_int/ca_chain
     /pki/ca/crl.pem   → OpenBao /v1/_sys_pki_int/crl
 """
 
+import json
 import logging
+import re
 
 import httpx
 
@@ -21,7 +31,7 @@ from .vault.pki_ca import _INT_MOUNT as _PKI_INT_MOUNT, _ROOT_MOUNT as _PKI_ROOT
 
 logger = logging.getLogger("mcp-vault.pki-middleware")
 
-# Headers de réponse à propager vers le client ACME
+# Headers de réponse ACME à propager vers le client
 _ACME_RESPONSE_HEADERS = frozenset({
     "content-type",
     "replay-nonce",
@@ -33,12 +43,19 @@ _ACME_RESPONSE_HEADERS = frozenset({
     "x-ratelimit-remaining",
 })
 
+# Validation anti-injection de path : caractères autorisés dans les segments ACME
+# Pas de ../ ni // ni caractères de contrôle
+_SAFE_ACME_SUFFIX = re.compile(r'^(/[a-zA-Z0-9/_\-\.~%]*)?$')
+
+# Validation des query strings : caractères URL-safe seulement, pas de traversal
+_SAFE_QUERY_STRING = re.compile(r'^[a-zA-Z0-9=&%+\-_.~!*\'(,):@/?#\[\]]*$')
+
 
 class PkiMiddleware:
     """
     Middleware ASGI outermost — proxy transparent ACME + distribution CA.
 
-    Monté après AdminMiddleware dans create_app() (donc couche la plus externe).
+    Monté après AdminMiddleware dans create_app() (couche la plus externe).
     Les requêtes /acme/* et /pki/ca/* ne traversent JAMAIS AuthMiddleware.
     """
 
@@ -62,16 +79,28 @@ class PkiMiddleware:
     async def _proxy_acme(self, scope, receive, send, path: str) -> None:
         settings = get_settings()
         acme_suffix = path[len("/acme"):]  # /directory, /new-nonce, ...
+
+        # SÉCURITÉ CRITIQUE : validation anti-traversal du path ACME
+        if ".." in acme_suffix or "//" in acme_suffix or not _SAFE_ACME_SUFFIX.match(acme_suffix):
+            logger.warning(f"⚠️ PkiMiddleware : path ACME rejeté (traversal) : {acme_suffix!r}")
+            return await self._error(send, 400, "Invalid ACME path")
+
         target = f"{settings.openbao_addr}/v1/{_PKI_INT_MOUNT}/acme{acme_suffix}"
 
-        query = scope.get("query_string", b"")
-        if query:
-            target += f"?{query.decode()}"
+        # SÉCURITÉ CRITIQUE : validation de la query string
+        query_bytes = scope.get("query_string", b"")
+        if query_bytes:
+            query_str = query_bytes.decode(errors="replace")
+            if ".." in query_str or not _SAFE_QUERY_STRING.match(query_str):
+                logger.warning(f"⚠️ PkiMiddleware : query string ACME rejetée : {query_str!r}")
+                return await self._error(send, 400, "Invalid query parameters")
+            target += f"?{query_str}"
 
         await self._proxy_request(scope, receive, send, target)
 
     async def _proxy_pki_ca(self, scope, receive, send, path: str) -> None:
         settings = get_settings()
+        # Whitelist stricte — les paths /pki/ca/* sont fixes, pas d'injection possible
         path_map = {
             "/pki/ca/root.pem":  f"{settings.openbao_addr}/v1/{_PKI_ROOT_MOUNT}/ca/pem",
             "/pki/ca/chain.pem": f"{settings.openbao_addr}/v1/{_PKI_INT_MOUNT}/ca_chain",
@@ -105,7 +134,7 @@ class PkiMiddleware:
                     url=target,
                     content=body,
                     headers=req_headers,
-                    follow_redirects=True,
+                    follow_redirects=False,  # SÉCURITÉ : pas de SSRF via redirections
                 )
         except Exception as e:
             logger.error(f"❌ PkiMiddleware : connexion OpenBao échouée ({target}) : {e}")
@@ -127,7 +156,8 @@ class PkiMiddleware:
         await send({"type": "http.response.body", "body": content})
 
     async def _error(self, send, status: int, message: str) -> None:
-        body = f'{{"status":"error","message":"{message}"}}'.encode()
+        # MOYEN : json.dumps évite les injections JSON via message
+        body = json.dumps({"status": "error", "message": message}).encode()
         await send({
             "type": "http.response.start",
             "status": status,
