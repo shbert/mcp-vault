@@ -58,6 +58,37 @@ class Settings(BaseSettings):
     # Doit commencer par http:// ou https:// — validé au démarrage.
     pki_base_url: str = ""
 
+    # --- Mission token enforcement (issue #26, anti-confused-deputy C18) ---
+    # Désactivé par défaut : zéro impact sur les déploiements standalone (sans mcp-mission).
+    # Activer sur l'environnement E2E pour prouver C18.
+    enforce_mission_token_validation: bool = False
+
+    # URL du JWKS public de mcp-mission. Vide = validation JWT désactivée.
+    # Ex: https://mcp-mission.cloud-temple.app/.well-known/jwks.json
+    mission_jwks_url: str = ""
+
+    # Audience attendue dans le mission_token (anti-confused-deputy).
+    # Doit correspondre à l'aud JWT : ex "mcp-vault:prod:v1" ou l'instance_id Vault.
+    # Vide = vérification aud désactivée (non recommandé en production).
+    mission_token_aud: str = ""
+
+    # TTL du cache JWKS en secondes (défaut 60s — compromis révocation/performance).
+    mission_jwks_cache_ttl: int = 60
+
+    # Nombre max de refreshes JWKS par minute (rate-limit anti-DoS).
+    mission_jwks_max_refresh_per_min: int = 3
+
+    # Leeway JWT en secondes (tolérance clock skew inter-services).
+    mission_token_leeway_seconds: int = 10
+
+    # URL de vérification du statut de mission (mcp-mission status endpoint).
+    # Vide = vérification mission active désactivée.
+    # Ex: https://mcp-mission.cloud-temple.app/api/v1/missions/{mission_id}/status
+    mission_status_url: str = ""
+
+    # TTL du cache de statut de mission en secondes (court : fail-close rapide).
+    mission_status_cache_ttl: int = 5
+
     @property
     def pki_base_url_validated(self) -> str:
         """Retourne pki_base_url validé ou lève ValueError si malformé."""

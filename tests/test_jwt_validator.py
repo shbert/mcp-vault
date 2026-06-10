@@ -1,0 +1,561 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Tests non-complaisant — MissionTokenValidator (issue #26, C18).
+
+Vérifie que le validateur JWT ES256/JWKS échoue RÉELLEMENT sur chaque
+variante invalide, et non pas seulement quand il "devrait" échouer
+conceptuellement.
+
+Usage :
+    PYTHONPATH=src python -m pytest tests/test_jwt_validator.py -v
+"""
+
+import json
+import time
+import os
+import sys
+from datetime import datetime, timezone, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+
+os.environ.setdefault("MCP_SERVER_NAME", "mcp-vault-test")
+os.environ.setdefault("ADMIN_BOOTSTRAP_KEY", "Test-Bootstrap-Key-2026-Pour-Tests!!")
+
+
+def _run(coro):
+    """Run coroutine sans fermer la boucle (évite de casser get_event_loop() dans les tests suivants)."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
+
+# ── Génération de clés ES256 pour les tests ───────────────────────────────────
+
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import serialization
+import jwt
+
+
+def _make_es256_keypair():
+    """Génère une paire de clés EC P-256 pour les tests."""
+    priv = ec.generate_private_key(ec.SECP256R1())
+    pub = priv.public_key()
+    priv_pem = priv.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    return priv, pub, priv_pem
+
+
+def _make_jwks(pub_key, kid: str = "test-key-1") -> dict:
+    """Construit un JWKS minimaliste à partir d'une clé publique EC P-256."""
+    from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
+    import base64
+    pub_numbers = pub_key.public_key().public_numbers() if hasattr(pub_key, 'public_key') else pub_key.public_numbers()
+
+    def b64url(n: int) -> str:
+        b = n.to_bytes(32, "big")
+        return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+    return {
+        "keys": [{
+            "kty": "EC", "crv": "P-256", "use": "sig", "alg": "ES256",
+            "kid": kid,
+            "x": b64url(pub_numbers.x),
+            "y": b64url(pub_numbers.y),
+        }]
+    }
+
+
+def _make_token(
+    priv_key,
+    kid: str = "test-key-1",
+    mission_id: str = "mission-abc",
+    iss: str = "mcp-mission",
+    aud: str = "mcp-vault:test",
+    exp_delta: int = 300,
+    extra_claims: dict = None,
+) -> str:
+    """Génère un JWT ES256 signé pour les tests."""
+    now = datetime.now(timezone.utc)
+    payload = {
+        "iss": iss,
+        "aud": aud,
+        "exp": int((now + timedelta(seconds=exp_delta)).timestamp()),
+        "iat": int(now.timestamp()),
+        "mission_id": mission_id,
+    }
+    if extra_claims:
+        payload.update(extra_claims)
+
+    priv_pem = priv_key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    return jwt.encode(payload, priv_pem, algorithm="ES256", headers={"kid": kid})
+
+
+# ── Fixture : validator avec JWKS mocké ───────────────────────────────────────
+
+def _make_validator(jwks_dict: dict, aud: str = "mcp-vault:test"):
+    """Crée un MissionTokenValidator avec JWKS mocké (pas d'appel réseau)."""
+    from mcp_vault.auth.jwt_validator import MissionTokenValidator
+    from jwt import PyJWKSet
+
+    validator = MissionTokenValidator(
+        jwks_url="http://mock-jwks/.well-known/jwks.json",
+        expected_aud=aud,
+        cache_ttl=60,
+        max_refresh_per_min=3,
+    )
+    # Injecter le JWKS directement (bypass HTTP)
+    validator._jwks = PyJWKSet.from_dict(jwks_dict)
+    validator._jwks_fetched_at = time.monotonic()
+    return validator
+
+
+# ── Tests de validation nominale ──────────────────────────────────────────────
+
+class TestMissionTokenValidatorNominal:
+    """Contrôle positif : token valide → claims retournés."""
+
+    def test_valid_token_returns_claims(self):
+        """Token ES256 valide → claims dict avec mission_id."""
+        priv, pub, _ = _make_es256_keypair()
+        jwks = _make_jwks(pub)
+        validator = _make_validator(jwks)
+        token = _make_token(priv, mission_id="mission-xyz", aud="mcp-vault:test")
+
+        claims = validator.validate(token)
+
+        assert claims["mission_id"] == "mission-xyz"
+        assert claims["iss"] == "mcp-mission"
+        assert "exp" in claims
+
+    def test_valid_token_with_tenant_id(self):
+        """Token avec tenant_id → claim retourné."""
+        priv, pub, _ = _make_es256_keypair()
+        jwks = _make_jwks(pub)
+        validator = _make_validator(jwks)
+        token = _make_token(priv, extra_claims={"tenant_id": "tenant-42"})
+
+        claims = validator.validate(token)
+        assert claims["tenant_id"] == "tenant-42"
+
+
+# ── Tests C18 : variantes invalides rejetées ─────────────────────────────────
+
+class TestMissionTokenValidatorC18:
+    """
+    Tests non-complaisant C18 — chaque variante doit être rejetée AVANT
+    tout effet (aucun secret libéré, aucun token compact dans les erreurs).
+    """
+
+    def _assert_rejected(self, validator, token: str, expected_reason_prefix: str):
+        """Vérifie que le token est rejeté avec le bon reason code."""
+        from mcp_vault.auth.jwt_validator import MissionTokenError
+        with pytest.raises(MissionTokenError) as exc_info:
+            validator.validate(token)
+        reason = exc_info.value.reason
+        assert reason.startswith(expected_reason_prefix), (
+            f"Attendu reason '{expected_reason_prefix}*', obtenu '{reason}'"
+        )
+        # Non-complaisant : le token compact NE doit PAS apparaître dans reason
+        assert token not in reason, "Token compact divulgué dans le message d'erreur !"
+
+    def test_invalid_signature_rejected(self):
+        """Signature altérée → invalid_signature."""
+        priv, pub, _ = _make_es256_keypair()
+        priv2, pub2, _ = _make_es256_keypair()  # Clé différente
+        jwks = _make_jwks(pub)  # JWKS avec pub1, token signé avec priv2
+        validator = _make_validator(jwks)
+        token = _make_token(priv2, kid="test-key-1")  # Signe avec priv2 mais kid de pub1
+
+        self._assert_rejected(validator, token, "invalid_signature")
+
+    def test_expired_token_rejected(self):
+        """Token expiré → token_expired."""
+        priv, pub, _ = _make_es256_keypair()
+        jwks = _make_jwks(pub)
+        validator = _make_validator(jwks)
+        token = _make_token(priv, exp_delta=-10)  # expiré depuis 10s
+
+        self._assert_rejected(validator, token, "token_expired")
+
+    def test_wrong_issuer_rejected(self):
+        """iss ≠ mcp-mission → invalid_issuer."""
+        priv, pub, _ = _make_es256_keypair()
+        jwks = _make_jwks(pub)
+        validator = _make_validator(jwks)
+        token = _make_token(priv, iss="evil-issuer")
+
+        self._assert_rejected(validator, token, "invalid_issuer")
+
+    def test_wrong_audience_rejected(self):
+        """aud ≠ vault_ref configuré → invalid_audience (confused-deputy)."""
+        priv, pub, _ = _make_es256_keypair()
+        jwks = _make_jwks(pub)
+        validator = _make_validator(jwks, aud="mcp-vault:prod")
+        token = _make_token(priv, aud="mcp-teleport:prod")  # Token pour teleport, pas vault
+
+        self._assert_rejected(validator, token, "invalid_audience")
+
+    def test_missing_mission_id_rejected(self):
+        """mission_id absent → missing_claim."""
+        priv, pub, _ = _make_es256_keypair()
+        jwks = _make_jwks(pub)
+        validator = _make_validator(jwks)
+
+        payload = {
+            "iss": "mcp-mission", "aud": "mcp-vault:test",
+            "exp": int((datetime.now(timezone.utc) + timedelta(seconds=300)).timestamp()),
+            "iat": int(datetime.now(timezone.utc).timestamp()),
+            # mission_id absent intentionnellement
+        }
+        priv_pem = priv.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        token = jwt.encode(payload, priv_pem, algorithm="ES256", headers={"kid": "test-key-1"})
+
+        self._assert_rejected(validator, token, "missing_claim")
+
+    def test_wrong_algorithm_rejected(self):
+        """Algorithme non ES256 (ex: HS256) → unsupported_algorithm."""
+        from mcp_vault.auth.jwt_validator import MissionTokenValidator, MissionTokenError
+        priv, pub, _ = _make_es256_keypair()
+        jwks = _make_jwks(pub)
+        validator = _make_validator(jwks)
+
+        payload = {
+            "iss": "mcp-mission", "aud": "mcp-vault:test",
+            "exp": int((datetime.now(timezone.utc) + timedelta(seconds=300)).timestamp()),
+            "mission_id": "m-abc",
+        }
+        token = jwt.encode(payload, "secret-hmac", algorithm="HS256")
+
+        self._assert_rejected(validator, token, "unsupported_algorithm")
+
+    def test_unknown_kid_after_refresh_rejected(self):
+        """kid absent du JWKS même après refresh → kid_unknown_or_revoked."""
+        from mcp_vault.auth.jwt_validator import MissionTokenValidator, MissionTokenError
+        priv, pub, _ = _make_es256_keypair()
+        priv2, pub2, _ = _make_es256_keypair()
+        jwks = _make_jwks(pub, kid="key-v1")  # JWKS ne contient que key-v1
+        validator = _make_validator(jwks)
+
+        # Token signé avec key-v2 (inconnu du JWKS)
+        token = _make_token(priv2, kid="key-v2")
+
+        # Le refresh JWKS est mocké pour retourner le même JWKS (sans key-v2)
+        with patch.object(validator, "_fetch_jwks_from_url", return_value=validator._jwks):
+            self._assert_rejected(validator, token, "kid_unknown_or_revoked")
+
+    def test_token_compact_never_in_error_message(self):
+        """Le token compact ne doit jamais apparaître dans le message d'erreur."""
+        from mcp_vault.auth.jwt_validator import MissionTokenError
+        priv, pub, _ = _make_es256_keypair()
+        jwks = _make_jwks(pub)
+        validator = _make_validator(jwks)
+        token = _make_token(priv, iss="evil-issuer")  # Invalide
+
+        with pytest.raises(MissionTokenError) as exc_info:
+            validator.validate(token)
+
+        error_str = str(exc_info.value)
+        assert token not in error_str, "CRITIQUE : token compact divulgué dans l'erreur !"
+        assert "eyJ" not in error_str, "CRITIQUE : fragment JWT trouvé dans l'erreur !"
+
+    def test_malformed_token_rejected(self):
+        """Token complètement malformé → invalid_token_format."""
+        from mcp_vault.auth.jwt_validator import MissionTokenError
+        priv, pub, _ = _make_es256_keypair()
+        validator = _make_validator(_make_jwks(pub))
+
+        for bad_token in ["not.a.jwt", "garbage", "", "eyJ.bad"]:
+            with pytest.raises(MissionTokenError) as exc_info:
+                validator.validate(bad_token)
+            assert exc_info.value.reason in ("invalid_token_format", "decode_error",
+                                              "unsupported_algorithm:missing", "validation_failed")
+
+
+# ── Tests JWKS cache et rate-limit ───────────────────────────────────────────
+
+class TestJwksCacheAndRateLimit:
+    """Cache JWKS TTL-borné et rate-limit anti-DoS."""
+
+    def test_jwks_cache_used_within_ttl(self):
+        """Dans le TTL, _fetch_jwks_from_url n'est pas rappelé."""
+        priv, pub, _ = _make_es256_keypair()
+        validator = _make_validator(_make_jwks(pub))
+
+        fetch_count = [0]
+        original_fetch = validator._fetch_jwks_from_url
+
+        def counting_fetch():
+            fetch_count[0] += 1
+            return original_fetch()
+
+        validator._fetch_jwks_from_url = counting_fetch
+        validator._jwks_fetched_at = time.monotonic()  # Cache frais
+
+        priv2, pub2, _ = _make_es256_keypair()
+        token = _make_token(priv)
+        try:
+            validator.validate(token)
+        except Exception:
+            pass
+
+        assert fetch_count[0] == 0, "Cache non utilisé alors que dans le TTL !"
+
+    def test_rate_limit_on_unknown_kid(self):
+        """Après max_refresh_per_min refreshes, un unknown kid lève rate_limited."""
+        from mcp_vault.auth.jwt_validator import MissionTokenError
+        priv, pub, _ = _make_es256_keypair()
+        jwks = _make_jwks(pub, kid="real-key")
+        validator = _make_validator(jwks)
+        validator._max_refresh_per_min = 2
+
+        token = _make_token(priv, kid="ghost-key")
+
+        # Épuiser le rate-limit
+        with patch.object(validator, "_fetch_jwks_from_url", return_value=validator._jwks):
+            for _ in range(3):
+                try:
+                    validator.validate(token)
+                except MissionTokenError:
+                    pass
+
+        # Le 4ème appel doit lever rate_limited (window pas encore expirée)
+        validator._refresh_window_start = time.monotonic()  # reset window récente
+        validator._refresh_count = validator._max_refresh_per_min  # simuler limit atteinte
+
+        with pytest.raises(MissionTokenError) as exc_info:
+            validator._get_jwks(force_refresh=True)
+        assert exc_info.value.reason == "jwks_refresh_rate_limited"
+
+
+# ── Tests WrapRegistry extensions ────────────────────────────────────────────
+
+class TestWrapRegistryC18Extensions:
+    """Tests des nouvelles méthodes WrapRegistry (composite key, consuming, consumed)."""
+
+    def _make_registry(self):
+        """WrapRegistry en mémoire (pas de S3)."""
+        from mcp_vault.vault.wrapping import WrapRegistry
+
+        class InMemoryRegistry(WrapRegistry):
+            def __init__(self):
+                self._wraps = []
+                self._cache_time = float("inf")
+
+            def load(self): pass
+            def _save(self) -> bool: return True
+
+        return InMemoryRegistry()
+
+    def test_get_by_composite_key_found(self):
+        """Lookup (op_id, mission_id) retourne l'entrée active."""
+        r = self._make_registry()
+        r.register_pending("op-1", "m-1", "vault-a", "path/key", 300)
+        r.mark_active("op-1", "accessor-xyz")
+
+        entry = r.get_by_composite_key("op-1", "m-1")
+        assert entry is not None
+        assert entry["mission_id"] == "m-1"
+        assert entry["status"] == "active"
+
+    def test_get_by_composite_key_not_found_wrong_mission(self):
+        """Lookup avec mission_id incorrect → None (anti-collision)."""
+        r = self._make_registry()
+        r.register_pending("op-1", "m-1", "vault-a", "path/key", 300)
+        r.mark_active("op-1", "accessor-xyz")
+
+        entry = r.get_by_composite_key("op-1", "m-WRONG")
+        assert entry is None
+
+    def test_try_mark_consuming_transitions_to_consuming(self):
+        """try_mark_consuming passe "active" → "consuming"."""
+        r = self._make_registry()
+        r.register_pending("op-1", "m-1", "vault-a", "path/key", 300)
+        r.mark_active("op-1", "accessor-xyz")
+
+        result = r.try_mark_consuming("op-1", "m-1")
+        assert result is True
+
+        entry = next(e for e in r._wraps if e["operation_id"] == "op-1")
+        assert entry["status"] == "consuming"
+
+    def test_try_mark_consuming_already_consuming_returns_false(self):
+        """Deuxième try_mark_consuming sur même entry → False (anti-replay)."""
+        r = self._make_registry()
+        r.register_pending("op-1", "m-1", "vault-a", "path/key", 300)
+        r.mark_active("op-1", "accessor-xyz")
+
+        r.try_mark_consuming("op-1", "m-1")  # Premier
+        result = r.try_mark_consuming("op-1", "m-1")  # Deuxième
+        assert result is False
+
+    def test_mark_consumed_after_consuming(self):
+        """mark_consumed finalise l'état "consuming" → "consumed"."""
+        r = self._make_registry()
+        r.register_pending("op-1", "m-1", "vault-a", "path/key", 300)
+        r.mark_active("op-1", "accessor-xyz")
+        r.try_mark_consuming("op-1", "m-1")
+
+        result = r.mark_consumed("op-1", "m-1")
+        assert result is True
+
+        entry = next(e for e in r._wraps if e["operation_id"] == "op-1")
+        assert entry["status"] == "consumed"
+
+    def test_rollback_consuming_restores_active(self):
+        """rollback_consuming après échec OpenBao → retour "active" (retry possible)."""
+        r = self._make_registry()
+        r.register_pending("op-1", "m-1", "vault-a", "path/key", 300)
+        r.mark_active("op-1", "accessor-xyz")
+        r.try_mark_consuming("op-1", "m-1")
+
+        r.rollback_consuming("op-1", "m-1")
+
+        entry = next(e for e in r._wraps if e["operation_id"] == "op-1")
+        assert entry["status"] == "active"
+
+    def test_register_pending_stores_tenant_id_and_aud(self):
+        """register_pending stocke tenant_id et expected_aud (issue #26)."""
+        r = self._make_registry()
+        r.register_pending(
+            "op-1", "m-1", "vault-a", "path/key", 300,
+            tenant_id="tenant-42", expected_aud="mcp-vault:prod",
+        )
+        entry = r._wraps[0]
+        assert entry["tenant_id"] == "tenant-42"
+        assert entry["expected_aud"] == "mcp-vault:prod"
+
+    def test_get_by_composite_key_ambiguity_returns_none(self):
+        """Deux entrées active avec même (op_id, mission_id) → None (anomalie)."""
+        r = self._make_registry()
+        # Forcer deux entrées actives (état anormal)
+        r._wraps = [
+            {"operation_id": "op-1", "mission_id": "m-1", "status": "active",
+             "accessor": "a1", "vault_id": "v", "secret_path": "p",
+             "created_at": "", "expires_at": "", "tenant_id": "", "expected_aud": ""},
+            {"operation_id": "op-1", "mission_id": "m-1", "status": "active",
+             "accessor": "a2", "vault_id": "v", "secret_path": "p",
+             "created_at": "", "expires_at": "", "tenant_id": "", "expected_aud": ""},
+        ]
+        assert r.get_by_composite_key("op-1", "m-1") is None
+
+
+# ── Tests secret_consume (outil MCP) ─────────────────────────────────────────
+
+class TestSecretConsumeEndToEnd:
+    """Tests comportementaux de l'outil MCP secret_consume."""
+
+    def _make_scope(self, token="admin-token"):
+        import asyncio
+
+        async def _call_tool(tool_name, args, settings_override=None):
+            """Appelle l'outil server.secret_consume avec mocks."""
+            import os
+            os.environ["MCP_SERVER_NAME"] = "mcp-vault-test"
+            os.environ["ADMIN_BOOTSTRAP_KEY"] = "Test-Bootstrap-Key-2026-Pour-Tests!!"
+            if settings_override:
+                for k, v in settings_override.items():
+                    os.environ[k.upper()] = str(v)
+            from mcp_vault.server import secret_consume
+            return await secret_consume(**args)
+
+        return _call_tool
+
+    def test_consume_no_jwks_no_enforce_succeeds(self):
+        """Sans JWKS configuré et ENFORCE=false : consume réussit si registry OK."""
+        import asyncio
+        import os
+
+        os.environ.pop("MISSION_JWKS_URL", None)
+        os.environ["ENFORCE_MISSION_TOKEN_VALIDATION"] = "false"
+
+        from unittest.mock import AsyncMock, patch, MagicMock
+
+        mock_secret_data = {"data": {"password": "s3cr3t"}, "status": "ok"}
+
+        with patch("mcp_vault.vault.wrapping.consume_wrap_secret",
+                   new_callable=AsyncMock, return_value=mock_secret_data) as mock_consume:
+            from mcp_vault.server import secret_consume
+            result = _run(secret_consume(
+                wrap_token="wt-abc",
+                operation_id="op-123",
+                mission_token="dummy-not-validated",
+            ))
+
+        assert result["status"] == "ok"
+        mock_consume.assert_called_once()
+
+    def test_consume_with_enforce_and_no_jwks_returns_error(self):
+        """ENFORCE=true mais MISSION_JWKS_URL vide → erreur misconfigured."""
+        import asyncio, os
+        from mcp_vault.server import settings
+
+        original_enforce = settings.enforce_mission_token_validation
+        original_jwks = settings.mission_jwks_url
+        try:
+            # Patcher les settings directement (pas de reload de module)
+            object.__setattr__(settings, 'enforce_mission_token_validation', True)
+            object.__setattr__(settings, 'mission_jwks_url', '')
+
+            from mcp_vault.server import secret_consume
+            result = _run(secret_consume(
+                wrap_token="wt-abc",
+                operation_id="op-123",
+                mission_token="dummy",
+            ))
+
+            assert result["status"] == "error"
+            assert result["error_type"] == "misconfigured"
+        finally:
+            object.__setattr__(settings, 'enforce_mission_token_validation', original_enforce)
+            object.__setattr__(settings, 'mission_jwks_url', original_jwks)
+
+    def test_wrap_token_never_in_audit_result(self):
+        """wrap_token et mission_token ne doivent JAMAIS apparaître dans l'audit."""
+        import asyncio
+
+        audited: list[dict] = []
+
+        def mock_r(tool, result, vault_id="", detail=""):
+            audited.append({"tool": tool, "result": result})
+            return result
+
+        mock_secret = {"status": "ok", "data": {"password": "s3cr3t"}, "operation_id": "op-1"}
+
+        with patch("mcp_vault.server._r", side_effect=mock_r), \
+             patch("mcp_vault.vault.wrapping.consume_wrap_secret",
+                   new_callable=AsyncMock, return_value=mock_secret):
+            from mcp_vault.server import secret_consume
+
+            result = _run(secret_consume(
+                wrap_token="SENSITIVE_WRAP_TOKEN_12345",
+                operation_id="op-1",
+                mission_token="SENSITIVE_MISSION_TOKEN_EYJABC",
+            ))
+
+        # Vérifier que les tokens sensibles ne sont pas dans l'audit
+        for entry in audited:
+            result_str = str(entry)
+            assert "SENSITIVE_WRAP_TOKEN_12345" not in result_str, "wrap_token divulgué dans audit !"
+            assert "SENSITIVE_MISSION_TOKEN" not in result_str, "mission_token divulgué dans audit !"

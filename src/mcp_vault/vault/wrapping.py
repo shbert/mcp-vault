@@ -112,10 +112,16 @@ class WrapRegistry:
               "secret_path": str,
               "created_at": ISO,
               "expires_at": ISO,
-              "status": "pending" | "active" | "revoked" | "failed",
+              "status": "pending" | "active" | "consuming" | "consumed" | "revoked" | "failed",
+              "tenant_id": str,         # optionnel — pour binding JWT C18
+              "expected_aud": str,      # optionnel — vault_ref anti-confused-deputy
             }, ...
           ]
         }
+
+    Cycle de vie étendu (issue #26) :
+        "pending" → "active" → "consuming" → "consumed"
+                                            → "revoked" (si révocation explicite)
 
     Limite V1 : pas de CAS S3 → last-write-wins en cas de deux brokers simultanés.
     """
@@ -177,9 +183,12 @@ class WrapRegistry:
     # ── Write-ahead methods ──────────────────────────────────────────
 
     def register_pending(self, operation_id: str, mission_id: str,
-                         vault_id: str, secret_path: str, ttl_seconds: int) -> bool:
+                         vault_id: str, secret_path: str, ttl_seconds: int,
+                         tenant_id: str = "", expected_aud: str = "") -> bool:
         """
         Enregistre une intention de wrap AVANT l'appel OpenBao (status="pending").
+
+        tenant_id et expected_aud sont optionnels — utilisés pour le binding JWT (issue #26).
         Retourne True si persisté sur S3, False si S3 indisponible (erreur à remonter).
         """
         self._maybe_refresh()
@@ -193,6 +202,8 @@ class WrapRegistry:
             "created_at": now.isoformat(),
             "expires_at": (now + timedelta(seconds=ttl_seconds)).isoformat(),
             "status": "pending",
+            "tenant_id": tenant_id,
+            "expected_aud": expected_aud,
         }
         self._wraps.append(entry)
         if not self._save():
@@ -243,6 +254,86 @@ class WrapRegistry:
         """Retourne toutes les entrées correspondant à un operation_id."""
         self._maybe_refresh()
         return [e for e in self._wraps if e["operation_id"] == operation_id]
+
+    # ── Méthodes issue #26 (JWT binding + anti-replay) ──────────────
+
+    def get_by_composite_key(self, operation_id: str, mission_id: str) -> Optional[dict]:
+        """
+        Lookup par (operation_id, mission_id) — clé composite anti-collision.
+
+        Retourne l'entrée "active" ou "consuming" si trouvée.
+        Retourne None si introuvable ou déjà consumed/revoked.
+
+        Si plusieurs entrées correspondent (anomalie), retourne None (ambiguité → erreur).
+        """
+        self._maybe_refresh()
+        candidates = [
+            e for e in self._wraps
+            if e["operation_id"] == operation_id
+            and e["mission_id"] == mission_id
+            and e["status"] in ("active", "consuming")
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            logger.warning(
+                "⚠️ WrapRegistry : %d entrées (op=%s, mission=%s) — ambiguïté",
+                len(candidates), operation_id[:16], mission_id[:16],
+            )
+            return None
+        return None
+
+    def try_mark_consuming(self, operation_id: str, mission_id: str) -> bool:
+        """
+        Tente de passer l'entrée (op_id, mission_id) de "active" → "consuming".
+
+        Pattern atomic compare-and-swap (best-effort S3 V1) :
+            - Si status != "active" : return False (déjà consumed/raced)
+            - Set status = "consuming"
+            - Persisté sur S3 : return True
+            - Si S3 fail : rollback → return False
+
+        Le vrai backstop contre le double-consume est OpenBao single-use (le
+        wrap_token ne peut être consommé qu'une fois côté OpenBao).
+        """
+        self._maybe_refresh()
+        for entry in self._wraps:
+            if (entry["operation_id"] == operation_id
+                    and entry["mission_id"] == mission_id
+                    and entry["status"] == "active"):
+                entry["status"] = "consuming"
+                if self._save():
+                    return True
+                # Rollback si S3 fail
+                entry["status"] = "active"
+                return False
+        return False
+
+    def mark_consumed(self, operation_id: str, mission_id: str) -> bool:
+        """
+        Finalise la consommation : "consuming" → "consumed".
+        Appelé APRÈS succès de l'unwrap OpenBao.
+        """
+        for entry in self._wraps:
+            if (entry["operation_id"] == operation_id
+                    and entry["mission_id"] == mission_id
+                    and entry["status"] == "consuming"):
+                entry["status"] = "consumed"
+                return self._save()
+        return False
+
+    def rollback_consuming(self, operation_id: str, mission_id: str) -> None:
+        """
+        Rollback : "consuming" → "active" si l'unwrap OpenBao a échoué.
+        Permet un retry ultérieur.
+        """
+        for entry in self._wraps:
+            if (entry["operation_id"] == operation_id
+                    and entry["mission_id"] == mission_id
+                    and entry["status"] == "consuming"):
+                entry["status"] = "active"
+                self._save()
+                return
 
     def count(self) -> int:
         return len(self._wraps)
@@ -559,3 +650,108 @@ def _infer_intended_use(secret_path: str) -> str:
     if any(k in path_lower for k in ("api", "key", "token", "apikey")):
         return "api_key"
     return "password"
+
+
+# =============================================================================
+# Consommation médiée (issue #26 — anti-confused-deputy C18)
+# =============================================================================
+
+async def consume_wrap_secret(
+    wrap_token: str,
+    operation_id: str,
+    mission_id: str,
+) -> dict:
+    """
+    Libère un secret via le wrap_token après vérification du binding mission.
+
+    Appelé depuis server.secret_consume APRÈS validation du JWT mission_token.
+    La validation JWT (ES256/JWKS, iss/aud/exp) est faite en amont par le serveur.
+
+    Flux :
+    1. Lookup registry par (operation_id, mission_id) — clé composite
+    2. try_mark_consuming() — atomic best-effort (backstop : OpenBao single-use)
+    3. Unwrap OpenBao cubbyhole avec wrap_token
+    4. mark_consumed() — anti-replay
+    5. Retourner le secret (jamais wrap_token dans le retour)
+
+    Sécurité :
+    - wrap_token jamais loggué (paramètre SENSIBLE)
+    - En cas d'échec OpenBao, rollback_consuming() pour permettre un retry
+    - mission_id dans tous les logs (non-sensible, corrélation)
+    """
+    registry = get_wrap_registry()
+    if registry is None:
+        return {"status": "error", "error_type": "registry_unavailable",
+                "message": "Registre non disponible"}
+
+    client = _get_client()
+    if not client:
+        return {"status": "error", "error_type": "backend_unavailable",
+                "message": "OpenBao non disponible"}
+
+    settings = _get_config()
+
+    # ── 1. Lookup par clé composite ─────────────────────────────────
+    entry = registry.get_by_composite_key(operation_id, mission_id)
+    if entry is None:
+        # Chercher si l'entrée est consumed ou revoked (anti-replay)
+        all_entries = registry.find_by_operation_id(operation_id)
+        already_consumed = any(
+            e["mission_id"] == mission_id and e["status"] in ("consumed", "revoked")
+            for e in all_entries
+        )
+        if already_consumed:
+            return {"status": "error", "error_type": "already_consumed",
+                    "message": "Ce wrap a déjà été consommé"}
+        return {"status": "error", "error_type": "not_found",
+                "message": "Wrap introuvable (opération inconnue ou expirée)"}
+
+    # ── 2. Atomic try_mark_consuming ────────────────────────────────
+    if not registry.try_mark_consuming(operation_id, mission_id):
+        return {"status": "error", "error_type": "already_consuming",
+                "message": "Wrap en cours de consommation ou déjà consommé"}
+
+    # ── 3. Unwrap OpenBao cubbyhole ─────────────────────────────────
+    try:
+        # Utiliser un client éphémère avec le wrap_token comme token d'auth
+        import hvac as _hvac
+        ephemeral_client = _hvac.Client(url=settings.openbao_addr, token=wrap_token)
+        unwrap_response = ephemeral_client.sys.unwrap()
+
+        secret_data = unwrap_response.get("data", {})
+        if not secret_data:
+            registry.rollback_consuming(operation_id, mission_id)
+            return {"status": "error", "error_type": "empty_secret",
+                    "message": "Le wrap a retourné des données vides"}
+
+    except Exception as e:
+        err_str = str(e).lower()
+        registry.rollback_consuming(operation_id, mission_id)
+
+        if any(k in err_str for k in ("403", "forbidden", "bad token")):
+            return {"status": "error", "error_type": "invalid_wrap_token",
+                    "message": "Wrap token invalide ou expiré"}
+        if any(k in err_str for k in ("404", "not found")):
+            return {"status": "error", "error_type": "wrap_expired",
+                    "message": "Wrap token expiré ou déjà utilisé (single-use)"}
+
+        logger.error("consume_wrap_secret OpenBao error: %s", type(e).__name__)
+        return {"status": "error", "error_type": "backend_error",
+                "message": "Erreur lors de l'unwrap (réessayer)"}
+
+    # ── 4. Marquer consumed ─────────────────────────────────────────
+    registry.mark_consumed(operation_id, mission_id)
+    logger.info(
+        "✅ consume_wrap_secret : op=%s mission=%s vault=%s path=%s",
+        operation_id[:16], mission_id[:16],
+        entry.get("vault_id", "?"), entry.get("secret_path", "?"),
+    )
+
+    return {
+        "status": "ok",
+        "data": secret_data,
+        "operation_id": operation_id,
+        "mission_id": mission_id,
+        "vault_id": entry.get("vault_id", ""),
+        "secret_path": entry.get("secret_path", ""),
+    }
