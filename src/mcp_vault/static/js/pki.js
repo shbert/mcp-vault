@@ -17,17 +17,29 @@ async function loadPki() {
         return;
     }
 
-    const certs = await api('/pki/certs');
+    // Charger certs et rôles en parallèle
+    const [certs, roles] = await Promise.all([
+        api('/pki/certs'),
+        api('/pki/roles'),
+    ]);
+
     if (certs.status === 'error') {
         page.innerHTML = `<div class="error-banner">Erreur inventaire : ${esc(certs.message)}</div>`;
         return;
     }
 
-    page.innerHTML = _renderPkiPage(status, certs);
+    // Détails du rôle ACME principal (acme-servers)
+    let roleDetail = null;
+    if (roles.roles && roles.roles.length > 0) {
+        const d = await api(`/pki/roles/${encodeURIComponent(roles.roles[0])}`);
+        if (d.status === 'ok') roleDetail = d;
+    }
+
+    page.innerHTML = _renderPkiPage(status, certs, roles, roleDetail);
 }
 
 /* ─── Rendu page PKI initialisée ─── */
-function _renderPkiPage(s, certs) {
+function _renderPkiPage(s, certs, roles, roleDetail) {
     const now = new Date();
     const rootExp = s.root_expires !== 'inconnu' ? new Date(s.root_expires) : null;
     const intExp  = s.int_expires  !== 'inconnu' ? new Date(s.int_expires)  : null;
@@ -100,6 +112,10 @@ function _renderPkiPage(s, certs) {
         ${_urlRow('Directory ACME', s.acme_directory)}
     </div>
 
+    <!-- Rôles ACME -->
+    <div class="section-title">Rôle ACME — politique d'émission</div>
+    ${_renderAcmeRoles(roles, roleDetail)}
+
     <!-- Inventaire certs -->
     <div class="section-title">Inventaire des certificats</div>
     <div class="table-wrapper">
@@ -110,6 +126,30 @@ function _renderPkiPage(s, certs) {
             </tr></thead>
             <tbody>${certRows}</tbody>
         </table>
+    </div>`;
+}
+
+function _renderAcmeRoles(roles, detail) {
+    if (!roles || roles.status === 'error' || !roles.roles || roles.roles.length === 0) {
+        return '<div class="empty-state" style="padding:0.5rem">Aucun rôle ACME configuré</div>';
+    }
+    const roleList = roles.roles.map(r => `<code>${esc(r)}</code>`).join(', ');
+    if (!detail) return `<div class="help-text">Rôles : ${roleList}</div>`;
+
+    const domains = (detail.allowed_domains || []).join(', ') || '—';
+    const flags = [
+        detail.server_flag ? 'server' : null,
+        detail.allow_subdomains ? 'subdomains' : null,
+        detail.allow_wildcard_certificates ? 'wildcard' : null,
+    ].filter(Boolean).join(', ') || '—';
+
+    return `<div class="url-list" style="gap:0.3rem">
+        <div class="url-row"><span class="url-label">Rôle actif</span><code class="url-value">${esc(detail.role_name)}</code></div>
+        <div class="url-row"><span class="url-label">Domaines autorisés</span><code class="url-value">${esc(domains)}</code></div>
+        <div class="url-row"><span class="url-label">TTL max</span><code class="url-value">${esc(detail.max_ttl || '—')}</code></div>
+        <div class="url-row"><span class="url-label">Flags</span><code class="url-value">${esc(flags)}</code></div>
+        <div class="url-row"><span class="url-label">IP SANs</span><code class="url-value">${detail.allow_ip_sans ? '✅ autorisés' : '❌ refusés'}</code></div>
+        <div class="url-row"><span class="url-label">Localhost</span><code class="url-value">${detail.allow_localhost ? '✅ autorisé' : '❌ refusé'}</code></div>
     </div>`;
 }
 
