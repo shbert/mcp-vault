@@ -26,7 +26,7 @@ SHELL_COMMANDS = {
     "about":      "Informations sur le service",
     "whoami":     "Identité du token courant (nom, permissions, vaults)",
     "vault":      "vault <op> [args] — create, list, info, update, delete",
-    "secret":     "secret <op> <vault> [args] — write, read, list, delete",
+    "secret":     "secret <op> <vault> [args] — write, read, list, delete, consume",
     "types":      "Lister les 14 types de secrets",
     "password":   "password [length] — Générer un mot de passe CSPRNG",
     "ssh":        "ssh <op> <vault> [args] — setup, sign, ca-key, roles, role-info",
@@ -128,7 +128,7 @@ async def cmd_vault(client, args="", json_output=False):
         show_vault_result(result)
 
 
-SECRET_OPS = ("write", "read", "list", "delete")
+SECRET_OPS = ("write", "read", "list", "delete", "consume")
 
 
 async def cmd_secret(client, args="", json_output=False):
@@ -183,6 +183,20 @@ async def cmd_secret(client, args="", json_output=False):
     elif op == "delete" and len(parts) >= 3:
         result = await client.call_tool("secret_delete", {
             "vault_id": parts[1], "path": parts[2],
+        })
+    elif op == "consume" and len(parts) >= 2:
+        # secret consume <operation_id>
+        # Tokens sensibles depuis les variables d'environnement (pas dans l'historique)
+        import os
+        wrap_token_val = os.environ.get("VAULT_WRAP_TOKEN", "")
+        mission_token_val = os.environ.get("VAULT_MISSION_TOKEN", "")
+        if not wrap_token_val:
+            show_error("VAULT_WRAP_TOKEN non défini (export VAULT_WRAP_TOKEN=...)")
+            return
+        result = await client.call_tool("secret_consume", {
+            "wrap_token": wrap_token_val,
+            "operation_id": parts[1],
+            "mission_token": mission_token_val,
         })
     else:
         show_warning(f"Usage: secret {op} <vault> <path>")

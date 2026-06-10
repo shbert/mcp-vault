@@ -386,6 +386,46 @@ def secret_password_cmd(ctx, length, no_symbols, no_uppercase, exclude, output_j
     asyncio.run(_run())
 
 
+@secret_group.command("consume")
+@click.argument("operation_id")
+@click.option("--wrap-token", "wrap_token",
+              envvar="VAULT_WRAP_TOKEN", required=True,
+              help="Token de déballage OpenBao (SENSIBLE — utiliser VAULT_WRAP_TOKEN)")
+@click.option("--mission-token", "mission_token",
+              envvar="VAULT_MISSION_TOKEN", default="",
+              help="JWT mission_token ES256 (SENSIBLE — utiliser VAULT_MISSION_TOKEN)")
+@click.option("--json", "-j", "output_json", is_flag=True, help="Sortie JSON brute")
+@click.pass_context
+def secret_consume_cmd(ctx, operation_id, wrap_token, mission_token, output_json):
+    """Libérer un secret via wrap_token avec validation JWT (anti-confused-deputy C18).
+
+    \b
+    OPERATION_ID : Identifiant de l'opération (corrélation registry)
+
+    \b
+    Tokens sensibles passés via variables d'environnement (pas dans l'historique bash) :
+      VAULT_WRAP_TOKEN    = token de déballage OpenBao (single-use)
+      VAULT_MISSION_TOKEN = JWT mission_token ES256 (si mcp-mission configuré)
+
+    \b
+    Exemples :
+      VAULT_WRAP_TOKEN=hvs.CAES... mcp-vault secret consume op-123
+      VAULT_WRAP_TOKEN=... VAULT_MISSION_TOKEN=eyJ... mcp-vault secret consume op-123
+    """
+    async def _run():
+        client = MCPClient(ctx.obj["url"], ctx.obj["token"])
+        result = await client.call_tool("secret_consume", {
+            "wrap_token": wrap_token,
+            "operation_id": operation_id,
+            "mission_token": mission_token,
+        })
+        if output_json:
+            show_json(result)
+        else:
+            show_secret_result(result)
+    asyncio.run(_run())
+
+
 # =============================================================================
 # SSH CA (groupe)
 # =============================================================================

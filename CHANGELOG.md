@@ -1,5 +1,74 @@
 # Changelog — MCP Vault
 
+## [0.6.0] — 2026-06-10
+
+### Anti-confused-deputy C18 — validation JWT mission_token ES256/JWKS (issue #26)
+
+Alignement de mcp-vault sur la matrice E2E C18 : comme mcp-teleport, mcp-vault valide désormais l'identité de mission avant de libérer un secret. Purement additif — zéro impact sur les déploiements standalone (sans mcp-mission).
+
+#### Nouvel outil MCP `secret_consume` (32 outils total)
+```
+secret_consume(wrap_token, operation_id, mission_token) → secret_data
+```
+- Valide le JWT mission_token ES256 (JWKS public mcp-mission)
+- Vérifie les bindings registry : mission_id, tenant_id, aud (anti-confused-deputy)
+- Vérifie la mission active côté mcp-mission (cache 5s, fail-close)
+- Unwrap OpenBao cubbyhole + anti-replay (status: "consumed")
+- Audit log sans données sensibles (wrap_token et mission_token jamais loggués)
+
+#### `auth/jwt_validator.py` (nouveau module)
+- `MissionTokenValidator` : cache JWKS TTL-borné (60s), refresh sur kid inconnu, rate-limit (3/min), détection kid révoqué post-refresh, thread-safe (threading.Lock)
+- `MissionTokenError` : reason code machine, jamais le token compact dans le message
+- Algorithme : ES256 uniquement
+
+#### `vault/wrapping.py` — extensions C18
+- `register_pending()` : +`tenant_id`, +`expected_aud` optionnels (binding JWT)
+- `get_by_composite_key(operation_id, mission_id)` : lookup anti-collision (clé composite)
+- `try_mark_consuming()` : atomic compare-and-swap "active" → "consuming" (anti-replay)
+- `mark_consumed()` : "consuming" → "consumed" après succès OpenBao
+- `rollback_consuming()` : "consuming" → "active" si OpenBao échoue
+- Statuts étendus : `consuming`, `consumed`
+- `consume_wrap_secret()` : unwrap médié complet
+
+#### Nouveaux settings (8)
+| Variable | Défaut | Description |
+|----------|--------|-------------|
+| `ENFORCE_MISSION_TOKEN_VALIDATION` | `false` | Hard-reject. False = log warning (migration) |
+| `MISSION_JWKS_URL` | *(vide)* | JWKS public mcp-mission. Vide = validation désactivée |
+| `MISSION_TOKEN_AUD` | *(vide)* | Audience vault_ref (anti-confused-deputy) |
+| `MISSION_JWKS_CACHE_TTL` | `60` | TTL cache JWKS en secondes |
+| `MISSION_JWKS_MAX_REFRESH_PER_MIN` | `3` | Rate-limit refresh JWKS |
+| `MISSION_TOKEN_LEEWAY_SECONDS` | `10` | Tolérance clock skew |
+| `MISSION_STATUS_URL` | *(vide)* | Vérification mission active (template {mission_id}) |
+| `MISSION_STATUS_CACHE_TTL` | `5` | TTL cache statut mission (court — fail-close rapide) |
+
+#### Corrections Codex (CRITIQUE×2 + ÉLEVÉ×1)
+- thread-safety rate-limit JWKS (appelé sous threading.Lock par construction)
+- `_mission_status_lock` créé au niveau module (anti-race création lazy)
+- `rollback_consuming()` retourne bool + log si S3 fail
+
+#### CLI — tokens sensibles via variables d'environnement
+`secret consume` passe `wrap_token` et `mission_token` via `VAULT_WRAP_TOKEN` et
+`VAULT_MISSION_TOKEN` (pas en arguments positionnels — évite l'exposition dans
+`~/.bash_history`). Pattern identique à `MCP_TOKEN`/`ADMIN_BOOTSTRAP_KEY`.
+`.env.example` documenté avec les 8 groupes de variables.
+
+```bash
+VAULT_WRAP_TOKEN=hvs.CAES... VAULT_MISSION_TOKEN=eyJ... \
+mcp-vault secret consume op-123
+```
+
+#### Tests non-complaisant
+- `tests/test_jwt_validator.py` (24 tests) : contrôle positif + 11 variantes C18 rejetées (signature, exp, iss, aud, mission_id, algo, kid révoqué, token compact jamais divulgué, malformé) + cache/rate-limit + WrapRegistry extensions + secret_consume standalone/enforce
+
+### Fichiers modifiés
+- `src/mcp_vault/auth/jwt_validator.py` *(nouveau)*
+- `src/mcp_vault/vault/wrapping.py` — extensions C18
+- `src/mcp_vault/server.py` — secret_consume + _check_mission_active
+- `src/mcp_vault/config.py` — 8 settings JWT
+- `requirements.txt` — PyJWT>=2.10.0
+- `tests/test_jwt_validator.py` *(nouveau)* — 24 tests
+
 ## [0.5.1] — 2026-06-10
 
 ### Correctifs PKI ACME — validation en conditions réelles Docker (issue #15 T0-T10)

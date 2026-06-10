@@ -63,7 +63,7 @@ Au démarrage, MCP Vault :
 
 ---
 
-## 🛠️ Outils MCP (31)
+## 🛠️ Outils MCP (32)
 
 ### System (2)
 
@@ -143,6 +143,14 @@ CA souveraine pour l'écosystème : les WAF Caddy s'enrôlent via ACME exactemen
 > Endpoints publics (non-auth, standard ACME/PKI) : `/acme/directory`, `/pki/ca/root.pem`, `/pki/ca/chain.pem`, `/pki/ca/crl.pem`
 >
 > **`PKI_BASE_URL`** (optionnel) : URL de base pour les CDPs et le cluster path OpenBao ACME. Vide = déduit de `MCP_ALLOWED_HOSTS`. Override test Docker : `http://mcp-vault:8030`. Doit être `http(s)://`.
+
+### Consommation médiée — JWT mission_token (1) *(v0.6.0)*
+
+| Outil | Perm | Description |
+| --- | --- | --- |
+| `secret_consume(wrap_token, operation_id, mission_token)` | admin | Valide JWT ES256/JWKS, vérifie binding mission, unwrap OpenBao (C18) |
+
+> Activer avec `ENFORCE_MISSION_TOKEN_VALIDATION=true`. Par défaut (false) : log warning, continue — zéro impact standalone sans mcp-mission.
 
 ### Audit (1)
 
@@ -253,6 +261,30 @@ Voir [scripts/README.md](scripts/README.md) pour la documentation complète du C
 
 ---
 
+## ⚙️ Variables d'environnement
+
+Copier `.env.example` → `.env` et adapter. Les variables sont groupées par domaine :
+
+| Groupe | Variables | Obligatoire |
+|--------|-----------|-------------|
+| **Serveur** | `MCP_SERVER_NAME`, `MCP_SERVER_PORT`, `MCP_ALLOWED_HOSTS` | Oui |
+| **Auth** | `ADMIN_BOOTSTRAP_KEY` | Oui |
+| **S3** | `S3_ENDPOINT_URL`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET_NAME`, `S3_REGION_NAME` | Oui |
+| **OpenBao** | `OPENBAO_ADDR`, `OPENBAO_SHARES`, `OPENBAO_THRESHOLD` | Oui |
+| **Storage sync** | `VAULT_S3_PREFIX`, `VAULT_S3_SYNC_INTERVAL` | Non |
+| **PKI** *(v0.5.x)* | `PKI_BASE_URL` | Non — override URL ACME en test Docker |
+| **Mission JWT** *(v0.6.0)* | `ENFORCE_MISSION_TOKEN_VALIDATION`, `MISSION_JWKS_URL`, `MISSION_TOKEN_AUD`, `MISSION_JWKS_CACHE_TTL`, `MISSION_STATUS_URL` | Non — standalone sans mcp-mission |
+| **CLI tokens** | `VAULT_WRAP_TOKEN`, `VAULT_MISSION_TOKEN` | Non — exporter avant la commande, jamais dans `.env` |
+
+> **Tokens sensibles CLI** : `VAULT_WRAP_TOKEN` et `VAULT_MISSION_TOKEN` ne doivent PAS être stockés dans `.env` — ils changent à chaque opération. Passer via `export` ou inline :
+> ```bash
+> VAULT_WRAP_TOKEN=hvs.CAES... mcp-vault secret consume op-123
+> ```
+
+Voir `.env.example` pour la documentation complète de chaque variable.
+
+---
+
 ## 🏗️ Architecture
 
 > 📐 **Documentation complète** : le dossier [`DESIGN/mcp-vault/`](DESIGN/mcp-vault/) contient la spécification détaillée ([ARCHITECTURE.md](DESIGN/mcp-vault/ARCHITECTURE.md) — vision, sécurité, SSH CA, policies, roadmap HSM) et la documentation technique ([TECHNICAL.md](DESIGN/mcp-vault/TECHNICAL.md) — modules, Docker, tests, dépendances).
@@ -304,7 +336,7 @@ Les clés unseal d'OpenBao sont protégées par **séparation physique à 3 fact
 
 | Version              | Approche                                                                                                            |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **v0.5.1** (actuel)  | Clés sur S3 chiffrées AES-256-GCM+AAD, mémoire seule au runtime — 60 findings audités (28 corrigés, 13 résiduels documentés) |
+| **v0.6.0** (actuel)  | Clés sur S3 chiffrées AES-256-GCM+AAD, mémoire seule au runtime — 60 findings audités (28 corrigés, 13 résiduels documentés) |
 | **v1.0**             | Transit Auto-Unseal via OpenBao dédié (KMS Cloud Temple)                                                            |
 | **v2.0**             | **Connexion HSM** (Hardware Security Module) Cloud Temple — les clés ne quittent jamais le module matériel certifié |
 
@@ -367,7 +399,7 @@ mcp-vault/
 ├── Dockerfile                # Multi-stage (OpenBao 2.5.1 + Python 3.12)
 ├── requirements.txt          # Dépendances Python
 ├── requirements.lock         # Dépendances pinnées (versions exactes)
-├── VERSION                   # 0.5.1
+├── VERSION                   # 0.6.0
 ├── DESIGN/mcp-vault/
 │   ├── ARCHITECTURE.md       # Spécification détaillée (v0.2.2-draft)
 │   ├── TECHNICAL.md          # Documentation technique (v0.4.16)
@@ -427,4 +459,4 @@ mcp-vault/
 
 ---
 
-**Licence** : Apache 2.0 | **Auteur** : Cloud Temple | **Version** : 0.5.1
+**Licence** : Apache 2.0 | **Auteur** : Cloud Temple | **Version** : 0.6.0
