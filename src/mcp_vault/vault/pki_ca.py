@@ -113,17 +113,23 @@ def is_pki_initialized() -> bool:
 
 
 def _base_url() -> str:
-    """URL publique de la façade mcp-vault (issuing_certificates, ACME directory)."""
+    """URL publique de la façade mcp-vault (issuing_certificates, ACME directory).
+
+    Priorité : PKI_BASE_URL (override explicite, ex: http://mcp-vault:8030 en test Docker)
+    > premier FQDN non-loopback de MCP_ALLOWED_HOSTS (https://{fqdn})
+    > fallback localhost (invalide en prod — warning émis).
+    """
     settings = get_settings()
+    if settings.pki_base_url:
+        return settings.pki_base_url_validated
     hosts = settings.allowed_hosts_list
     loopback = {"127.0.0.1", "localhost", "::1"}
     fqdn = next((h for h in hosts if h not in loopback), None)
     if not fqdn:
-        # MOYEN : les CDP et URLs ACME seront localhost — non-routables pour clients externes
         logger.warning(
             "⚠️ PKI : aucun FQDN public dans MCP_ALLOWED_HOSTS — "
             "les CDPs et URLs ACME utiliseront localhost (invalides en prod). "
-            "Configurer MCP_ALLOWED_HOSTS avec le FQDN public."
+            "Configurer MCP_ALLOWED_HOSTS ou PKI_BASE_URL."
         )
         return "http://localhost:8080"
     return f"https://{fqdn}"
@@ -178,15 +184,22 @@ async def setup_pki_ca(lab_mode: bool = True,
             # ── 1. CA Racine ────────────────────────────────────────────────
             _mount_pki_engine(client, _ROOT_MOUNT, "87600h")
 
-            root_resp = client.write(
-                f"{_ROOT_MOUNT}/root/generate/internal",
-                common_name="MCP Vault Root CA",
-                ttl="87600h",
-                key_type="rsa",
-                key_bits=4096,
-                issuer_name="mcp-vault-root",
-            )
-            root_cert_pem = root_resp.get("data", {}).get("certificate", "") if root_resp else ""
+            root_cert_pem = ""
+            try:
+                root_resp = client.write(
+                    f"{_ROOT_MOUNT}/root/generate/internal",
+                    common_name="MCP Vault Root CA",
+                    ttl="87600h",
+                    key_type="rsa",
+                    key_bits=4096,
+                    issuer_name="mcp-vault-root",
+                )
+                root_cert_pem = root_resp.get("data", {}).get("certificate", "") if root_resp else ""
+            except Exception as e:
+                if "issuer name already in use" in str(e).lower():
+                    logger.info("ℹ️  CA racine déjà générée — skip génération (idempotent)")
+                else:
+                    raise
 
             client.write(
                 f"{_ROOT_MOUNT}/config/urls",
@@ -198,35 +211,41 @@ async def setup_pki_ca(lab_mode: bool = True,
             # ── 2. CA Intermédiaire ─────────────────────────────────────────
             _mount_pki_engine(client, _INT_MOUNT, "43800h")
 
-            csr_resp = client.write(
-                f"{_INT_MOUNT}/intermediate/generate/internal",
-                common_name="MCP Vault Intermediate CA",
-                ttl="43800h",
-                key_type="rsa",
-                key_bits=4096,
-                issuer_name="mcp-vault-int",
-                add_basic_constraints=True,
-            )
-            csr = csr_resp["data"]["csr"]
+            try:
+                csr_resp = client.write(
+                    f"{_INT_MOUNT}/intermediate/generate/internal",
+                    common_name="MCP Vault Intermediate CA",
+                    ttl="43800h",
+                    key_type="rsa",
+                    key_bits=4096,
+                    issuer_name="mcp-vault-int",
+                    add_basic_constraints=True,
+                )
+                csr = csr_resp["data"]["csr"]
 
-            sign_resp = client.write(
-                f"{_ROOT_MOUNT}/root/sign-intermediate",
-                csr=csr,
-                format="pem_bundle",
-                ttl="43800h",
-                issuer_ref="mcp-vault-root",
-            )
-            signed_cert = sign_resp["data"]["certificate"]
+                sign_resp = client.write(
+                    f"{_ROOT_MOUNT}/root/sign-intermediate",
+                    csr=csr,
+                    format="pem_bundle",
+                    ttl="43800h",
+                    issuer_ref="mcp-vault-root",
+                )
+                signed_cert = sign_resp["data"]["certificate"]
 
-            import_resp = client.write(
-                f"{_INT_MOUNT}/intermediate/set-signed",
-                certificate=signed_cert,
-            )
-            imported_issuers = import_resp.get("data", {}).get("imported_issuers", []) if import_resp else []
-            new_issuer_id = imported_issuers[0] if imported_issuers else ""
+                import_resp = client.write(
+                    f"{_INT_MOUNT}/intermediate/set-signed",
+                    certificate=signed_cert,
+                )
+                imported_issuers = import_resp.get("data", {}).get("imported_issuers", []) if import_resp else []
+                new_issuer_id = imported_issuers[0] if imported_issuers else ""
 
-            if new_issuer_id:
-                client.write(f"{_INT_MOUNT}/config/issuers", default=new_issuer_id)
+                if new_issuer_id:
+                    client.write(f"{_INT_MOUNT}/config/issuers", default=new_issuer_id)
+            except Exception as e:
+                if "issuer name already in use" in str(e).lower():
+                    logger.info("ℹ️  CA intermédiaire déjà générée — skip génération (idempotent)")
+                else:
+                    raise
 
             client.write(
                 f"{_INT_MOUNT}/config/urls",
@@ -254,6 +273,20 @@ async def setup_pki_ca(lab_mode: bool = True,
                 require_cn=False,
             )
             logger.info(f"✅ Rôle ACME '{_ACME_ROLE_NAME}' configuré pour {allowed_domains}")
+
+            # ── 3b. Cluster path (requis par OpenBao pour ACME) ─────────────
+            # OpenBao génère des URLs absolues dans le directory ACME basées
+            # sur ce chemin. PkiMiddleware gère les deux patterns :
+            #   /acme/*               (URL courte, user-facing)
+            #   /v1/_sys_pki_int/acme/* (URL longue, générée par OpenBao)
+            # Note : hvac.write(path, **kwargs) a path en 1er arg → collision
+            # avec le champ body OpenBao "path". On passe par l'adaptateur.
+            _cluster_path = f"{base}/v1/{_INT_MOUNT}"
+            client._adapter.post(
+                f"/v1/{_INT_MOUNT}/config/cluster",
+                json={"path": _cluster_path},
+            )
+            logger.info(f"✅ Cluster path PKI configuré : {_cluster_path}")
 
             # ── 4. Serveur ACME ─────────────────────────────────────────────
             client.write(
@@ -415,6 +448,7 @@ async def get_pki_role_info(role_name: str) -> dict:
             "status": "ok",
             "role_name": role_name,
             "allowed_domains": data.get("allowed_domains", []),
+            "allow_any_name": data.get("allow_any_name", False),
             "allow_subdomains": data.get("allow_subdomains", False),
             "allow_wildcard_certificates": data.get("allow_wildcard_certificates", False),
             "server_flag": data.get("server_flag", False),

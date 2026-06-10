@@ -1,0 +1,24 @@
+services:
+  caddy-test:
+    image: caddy:2-alpine
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - mcp-net
+    ports:
+      - "8444:443"
+    # Permet à OpenBao (dans mcp-vault) de joindre caddy-test sur port 80 via HTTP-01
+    expose:
+      - "80"
+      - "443"
+
+volumes:
+  caddy-data:
+  caddy-config:
+
+networks:
+  mcp-net:
+    external: true
+    name: mcp-vault_mcp-net

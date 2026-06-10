@@ -71,6 +71,11 @@ class PkiMiddleware:
         if path.startswith("/acme/") or path in ("/acme", "/acme/"):
             return await self._proxy_acme(scope, receive, send, path)
 
+        # URL longue générée par OpenBao dans les réponses ACME directory
+        # (ex: {base}/v1/_sys_pki_int/acme/new-nonce) — proxy direct vers OpenBao
+        if path.startswith(f"/v1/{_PKI_INT_MOUNT}/acme/") or path == f"/v1/{_PKI_INT_MOUNT}/acme":
+            return await self._proxy_acme_long(scope, receive, send, path)
+
         if path in ("/pki/ca/root.pem", "/pki/ca/chain.pem", "/pki/ca/crl.pem"):
             return await self._proxy_pki_ca(scope, receive, send, path)
 
@@ -98,13 +103,33 @@ class PkiMiddleware:
 
         await self._proxy_request(scope, receive, send, target)
 
+    async def _proxy_acme_long(self, scope, receive, send, path: str) -> None:
+        """Proxy pour le path long /v1/_sys_pki_int/acme/* (généré par OpenBao)."""
+        settings = get_settings()
+        prefix = f"/v1/{_PKI_INT_MOUNT}"
+        acme_suffix = path[len(prefix):]  # /acme/new-nonce, /acme/directory, etc.
+
+        if ".." in acme_suffix or "//" in acme_suffix or not _SAFE_ACME_SUFFIX.match(acme_suffix):
+            logger.warning(f"⚠️ PkiMiddleware (long path) : path ACME rejeté : {acme_suffix!r}")
+            return await self._error(send, 400, "Invalid ACME path")
+
+        target = f"{settings.openbao_addr}/v1/{_PKI_INT_MOUNT}{acme_suffix}"
+        query = scope.get("query_string", b"")
+        if query:
+            query_str = query.decode(errors="replace")
+            if ".." in query_str or not _SAFE_QUERY_STRING.match(query_str):
+                return await self._error(send, 400, "Invalid query parameters")
+            target += f"?{query_str}"
+
+        await self._proxy_request(scope, receive, send, target)
+
     async def _proxy_pki_ca(self, scope, receive, send, path: str) -> None:
         settings = get_settings()
         # Whitelist stricte — les paths /pki/ca/* sont fixes, pas d'injection possible
         path_map = {
             "/pki/ca/root.pem":  f"{settings.openbao_addr}/v1/{_PKI_ROOT_MOUNT}/ca/pem",
             "/pki/ca/chain.pem": f"{settings.openbao_addr}/v1/{_PKI_INT_MOUNT}/ca_chain",
-            "/pki/ca/crl.pem":   f"{settings.openbao_addr}/v1/{_PKI_INT_MOUNT}/crl",
+            "/pki/ca/crl.pem":   f"{settings.openbao_addr}/v1/{_PKI_INT_MOUNT}/crl/pem",  # /crl/pem = PEM, /crl = DER
         }
         target = path_map.get(path)
         if not target:
