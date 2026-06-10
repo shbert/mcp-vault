@@ -20,8 +20,8 @@ MCP Vault est un serveur [MCP](https://modelcontextprotocol.io/) qui fournit un 
 
 | Document                                                | Description                                                                                                                                                                  |
 | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [**ARCHITECTURE.md**](DESIGN/mcp-vault/ARCHITECTURE.md) | Spécification complète — vision, architecture ASGI 5 couches, vaults, SSH CA, policies MCP (6 exemples prêts à l'emploi), sécurité des clés unseal (3 facteurs), roadmap HSM |
-| [**TECHNICAL.md**](DESIGN/mcp-vault/TECHNICAL.md)       | Documentation technique — 14 modules source, modèle de données, Docker, 312 tests e2e, dépendances, roadmap                                                                |
+| [**ARCHITECTURE.md**](DESIGN/mcp-vault/ARCHITECTURE.md) | Spécification complète — vision, architecture ASGI 6 couches, vaults, SSH CA, policies MCP (6 exemples prêts à l'emploi), sécurité des clés unseal (3 facteurs), roadmap HSM |
+| [**TECHNICAL.md**](DESIGN/mcp-vault/TECHNICAL.md)       | Documentation technique — modules source (incl. PKI v0.5.0), stack ASGI 6 couches, Docker, tests, dépendances, roadmap                                                     |
 | [**SECURITY_AUDIT.md**](DESIGN/mcp-vault/SECURITY_AUDIT.md) | Rapport d'audit de sécurité consolidé — 60 findings V2.1, 28 corrigés, 13 résiduels documentés                                                                         |
 | [**scripts/README.md**](scripts/README.md)              | Guide CLI complet — 7 groupes de commandes, shell interactif, exemples                                                                                                       |
 | [**tests/README.md**](tests/README.md)                  | Guide d'exécution des tests — 4 niveaux, ~600 tests, commandes pour auditeurs                                                                                                |
@@ -63,7 +63,7 @@ Au démarrage, MCP Vault :
 
 ---
 
-## 🛠️ Outils MCP (24)
+## 🛠️ Outils MCP (31)
 
 ### System (2)
 
@@ -125,6 +125,22 @@ Les policies permettent de restreindre finement les outils accessibles par token
 | Outil                                                          | Perm  | Description                                              |
 | -------------------------------------------------------------- | ----- | -------------------------------------------------------- |
 | `token_update(hash_prefix, policy_id?, permissions?, vaults?)` | admin | Modifier un token existant (policy, permissions, vaults) |
+
+### PKI interne — CA + ACME (7) *(v0.5.0)*
+
+CA souveraine pour l'écosystème : les WAF Caddy s'enrôlent via ACME exactement comme avec Let's Encrypt, mais sur une CA interne isolée du réseau public. Utilisable en lab (`*.lesur.lan`) et en prod air-gapped.
+
+| Outil | Perm | Description |
+| --- | --- | --- |
+| `pki_ca_setup(lab_mode, allowed_domains, leaf_ttl)` | admin | Initialise CA racine + intermédiaire + rôle ACME |
+| `pki_ca_public_key()` | read | CA racine PEM, empreinte SHA-256, URL stable |
+| `pki_ca_list_roles()` | read | Liste les rôles d'émission |
+| `pki_ca_role_info(role_name)` | read | Détails rôle (domaines, TTL, flags TLS) |
+| `pki_list_certs(limit?, offset?)` | admin | Inventaire paginé des certificats émis |
+| `pki_revoke_cert(serial_number)` | admin | Révocation + mise à jour CRL |
+| `pki_ca_rotate_intermediate(keep_old_issuer?, overlap_ttl?)` | admin | Rotation CA intermédiaire sans coupure |
+
+> Endpoints publics (non-auth, standard ACME/PKI) : `/acme/directory`, `/pki/ca/root.pem`, `/pki/ca/chain.pem`, `/pki/ca/crl.pem`
 
 ### Audit (1)
 
@@ -219,6 +235,12 @@ python scripts/mcp_cli.py policy create no-ssh -d "Pas de SSH" --denied "ssh_*"
 python scripts/mcp_cli.py policy create team-x --allowed "secret_*" --path-rules '[{"vault_pattern":"shared-*","allowed_paths":["shared/*"]}]'
 python scripts/mcp_cli.py audit --status denied --limit 10
 
+# PKI interne (v0.5.0)
+python scripts/mcp_cli.py pki setup --lab --domains '*.lesur.lan,lesur.lan'
+python scripts/mcp_cli.py pki ca-key
+python scripts/mcp_cli.py pki certs
+python scripts/mcp_cli.py pki revoke 12:34:ab:cd:ef:12:34:56
+
 # Shell interactif
 python scripts/mcp_cli.py shell
 ```
@@ -249,10 +271,12 @@ Le WAF protège l'API contre les attaques L7 (injections SQL, XSS, LFI, RCE, SSR
 - **Headers de sécurité** : CSP, X-Frame-Options DENY, X-XSS-Protection, nosniff
 - Méthodes autorisées adaptées au protocole MCP : GET, POST, DELETE, PUT, PATCH
 
-### Stack ASGI (5 couches)
+### Stack ASGI (6 couches)
 ```
-AdminMiddleware → HealthCheckMiddleware → AuthMiddleware → LoggingMiddleware → FastMCP
+PkiMiddleware → AdminMiddleware → HealthCheckMiddleware → AuthMiddleware → LoggingMiddleware → FastMCP
 ```
+
+`PkiMiddleware` (v0.5.0) est la couche la plus externe — intercepte `/acme/*` et `/pki/ca/*.pem` avant l'auth (endpoints publics par design PKI/ACME).
 
 ### Lifecycle OpenBao
 ```
@@ -278,7 +302,7 @@ Les clés unseal d'OpenBao sont protégées par **séparation physique à 3 fact
 
 | Version              | Approche                                                                                                            |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **v0.4.16** (actuel)  | Clés sur S3 chiffrées AES-256-GCM+AAD, mémoire seule au runtime — 60 findings audités (28 corrigés, 13 résiduels documentés) |
+| **v0.5.0** (actuel)  | Clés sur S3 chiffrées AES-256-GCM+AAD, mémoire seule au runtime — 60 findings audités (28 corrigés, 13 résiduels documentés) |
 | **v1.0**             | Transit Auto-Unseal via OpenBao dédié (KMS Cloud Temple)                                                            |
 | **v2.0**             | **Connexion HSM** (Hardware Security Module) Cloud Temple — les clés ne quittent jamais le module matériel certifié |
 
@@ -341,7 +365,7 @@ mcp-vault/
 ├── Dockerfile                # Multi-stage (OpenBao 2.5.1 + Python 3.12)
 ├── requirements.txt          # Dépendances Python
 ├── requirements.lock         # Dépendances pinnées (versions exactes)
-├── VERSION                   # 0.4.16
+├── VERSION                   # 0.5.0
 ├── DESIGN/mcp-vault/
 │   ├── ARCHITECTURE.md       # Spécification détaillée (v0.2.2-draft)
 │   ├── TECHNICAL.md          # Documentation technique (v0.4.16)
@@ -368,7 +392,7 @@ mcp-vault/
 │   └── static/               # Console admin SPA (parité CLI 100%)
 │       ├── admin.html        # HTML structure + 7 modals
 │       ├── css/admin.css     # Design Cloud Temple (dark theme)
-│       ├── js/               # 8 modules JS (config, api, app, dashboard, vaults, tokens, policies, activity)
+│       ├── js/               # 9 modules JS (config, api, app, dashboard, vaults, tokens, policies, activity, pki)
 │       └── img/              # logo-cloudtemple.svg
 ├── tests/
 │   ├── README.md             # Guide d'exécution des tests (auditeurs)
@@ -401,4 +425,4 @@ mcp-vault/
 
 ---
 
-**Licence** : Apache 2.0 | **Auteur** : Cloud Temple | **Version** : 0.4.16
+**Licence** : Apache 2.0 | **Auteur** : Cloud Temple | **Version** : 0.5.0
