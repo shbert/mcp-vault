@@ -111,6 +111,12 @@ class TokenStore:
         Retourne True si succès, False si S3 indisponible.
         Les appelants doivent rollback l'état mémoire si False est retourné
         (révocation perdue = faille sécurité critique).
+
+        LIMITATION V1 — last-write-wins (issue #13) :
+        En déploiement multi-instance, deux instances concurrent peuvent s'écraser
+        mutuellement (ex: instance A révoque T1 pendant qu'instance B crée T3 →
+        la révocation de T1 peut être perdue). Acceptable en V1 (single-instance).
+        V2 : utiliser S3 conditional write (If-Match: ETag) ou lock distribué.
         """
         try:
             s3 = self._get_s3_data()

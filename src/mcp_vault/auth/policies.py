@@ -98,6 +98,10 @@ class PolicyStore:
         Sauvegarde les policies sur S3 (PUT = SigV2).
         Retourne True si succès, False si S3 indisponible.
         Les appelants doivent rollback l'état mémoire si False est retourné.
+
+        LIMITATION V1 — last-write-wins (issue #13) :
+        Même contrainte que TokenStore._save() — pas d'ETag/CAS.
+        Acceptable en V1 (single-instance). V2 : conditional write S3.
         """
         try:
             s3 = self._get_s3_data()
