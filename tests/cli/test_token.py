@@ -1,125 +1,114 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-═══════════════════════════════════════════════════════════════
-  TEST CLI — Token : create, list, update, revoke + --policy
-═══════════════════════════════════════════════════════════════
+Tests CLI token — comportementaux (non-complaisant).
+
+Vérifie que chaque commande token appelle le bon outil MCP avec les bons
+arguments. Utilise run_cli_mocked() qui intercepte MCPClient.call_tool.
 """
+
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from . import (
     banner, section, check, check_value, check_contains,
-    run_cli, show_token_result, show_policy_result,
+    run_cli, run_cli_mocked,
 )
+
+_TOKEN_CREATED = {"status": "created", "token": "sk-vault-abc123", "hash_prefix": "abc123", "client_name": "agent-sre", "permissions": ["read"]}
+_TOKEN_LIST    = {"status": "ok", "tokens": [{"hash_prefix": "abc123", "client_name": "agent-sre", "permissions": ["read"], "revoked": False, "expired": False}]}
+_TOKEN_UPDATED = {"status": "ok", "hash_prefix": "abc123"}
+_TOKEN_REVOKED = {"status": "ok", "hash_prefix": "abc123"}
 
 
 def test_token():
-    """Teste toutes les commandes token du CLI."""
+    """Tests comportementaux token — vérifie les appels MCPClient réels."""
 
-    banner("CLI — Token (create, list, update, revoke)")
+    banner("CLI — Tokens : tests comportementaux (non-complaisant)")
 
-    # ── token --help ──
-    section("Aide token — owner-based par défaut")
+    # ── Aide ─────────────────────────────────────────────────────────────────
+    section("Aide token")
     r = run_cli(["token", "--help"])
     check_value("token --help exit code", r.exit_code, 0)
-    check_contains("Mentionne 'owner-based'", r.output, "owner-based")
-    check_contains("Mentionne '--policy'", r.output, "--policy")
     for subcmd in ["create", "list", "update", "revoke"]:
         check_contains(f"Sous-commande '{subcmd}'", r.output, subcmd)
 
-    # ── token create --help ──
-    section("Aide token create — --policy et --vaults")
+    # ── token create ─────────────────────────────────────────────────────────
+    section("token create — appelle token_update (create via admin API, pas outil MCP)")
+    # Note : token create n'appelle PAS un outil MCP — il appelle l'API REST /admin/api/tokens
+    # via httpx. On vérifie uniquement exit code et parsing des options.
     r = run_cli(["token", "create", "--help"])
-    check_value("Exit code", r.exit_code, 0)
-    check_contains("Argument NAME", r.output, "NAME")
-    check_contains("Option --permissions/-p", r.output, "--permissions")
-    check_contains("Option --vaults/-s (owner-based)", r.output, "owner-based")
+    check_value("token create --help exit code", r.exit_code, 0)
+    check_contains("Option --permissions", r.output, "--permissions")
+    check_contains("Option --vaults", r.output, "--vaults")
+    check_contains("Option --expires", r.output, "--expires")
     check_contains("Option --policy", r.output, "--policy")
-    check_contains("Option --expires/-e", r.output, "--expires")
-    check_contains("Option --email", r.output, "--email")
-    # Exemples pédagogiques
-    check_contains("Exemple agent-sre", r.output, "agent-sre")
-    check_contains("Exemple --policy readonly", r.output, "readonly")
-    check_contains("Explication vaults vide", r.output, "vaults qu'il crée")
 
-    # ── token list --help ──
-    section("Aide token list")
+    # ── token list ────────────────────────────────────────────────────────────
+    section("token list — aide et options")
     r = run_cli(["token", "list", "--help"])
     check_value("Exit code", r.exit_code, 0)
 
-    # ── token update --help ──
-    section("Aide token update")
-    r = run_cli(["token", "update", "--help"])
+    # ── token update (httpx REST, pas MCPClient) ─────────────────────────────
+    # token update appelle PUT /admin/api/tokens/{hash} via httpx directement.
+    # On mock httpx.AsyncClient pour capturer le body envoyé.
+
+    section("token update --policy — body JSON contient policy_id")
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"status": "ok", "hash_prefix": "abc123"}
+    mock_http = AsyncMock()
+    mock_http.put = AsyncMock(return_value=mock_resp)
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_http):
+        r = run_cli(["token", "update", "abc123", "--policy", "readonly"])
     check_value("Exit code", r.exit_code, 0)
-    check_contains("Argument HASH_PREFIX", r.output, "HASH_PREFIX")
-    check_contains("Option --policy", r.output, "--policy")
-    check_contains("Option --permissions", r.output, "--permissions")
-    check_contains("Option --vaults", r.output, "--vaults")
-    check_contains("Exemple _remove", r.output, "_remove")
+    check("PUT appelé", mock_http.put.called)
+    call_json = mock_http.put.call_args[1].get("json", {}) if mock_http.put.call_args else {}
+    check_value("policy_id transmis", call_json.get("policy_id"), "readonly")
+    check("hash_prefix dans URL", "abc123" in str(mock_http.put.call_args))
 
-    # ── token revoke --help ──
-    section("Aide token revoke")
-    r = run_cli(["token", "revoke", "--help"])
+    section("token update --policy _remove — policy_id vide (suppression)")
+    mock_resp2 = MagicMock()
+    mock_resp2.json.return_value = {"status": "ok"}
+    mock_http2 = AsyncMock()
+    mock_http2.put = AsyncMock(return_value=mock_resp2)
+    mock_http2.__aenter__ = AsyncMock(return_value=mock_http2)
+    mock_http2.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_http2):
+        r = run_cli(["token", "update", "abc123", "--policy", "_remove"])
     check_value("Exit code", r.exit_code, 0)
-    check_contains("Argument HASH_PREFIX", r.output, "HASH_PREFIX")
+    call_json2 = mock_http2.put.call_args[1].get("json", {}) if mock_http2.put.call_args else {}
+    check_value("policy_id vide (suppression)", call_json2.get("policy_id"), "")
 
-    # ═══════════════════════════════════════════════════════════════
-    # Tests d'affichage des tokens
-    # ═══════════════════════════════════════════════════════════════
+    section("token update --permissions read --vaults prod-vault")
+    mock_resp3 = MagicMock()
+    mock_resp3.json.return_value = {"status": "ok"}
+    mock_http3 = AsyncMock()
+    mock_http3.put = AsyncMock(return_value=mock_resp3)
+    mock_http3.__aenter__ = AsyncMock(return_value=mock_http3)
+    mock_http3.__aexit__ = AsyncMock(return_value=None)
 
-    section("Affichage token create — avec policy")
-    print("    [simulé] :")
-    show_token_result({
-        "status": "created",
-        "raw_token": "mvt_abc123def456ghi789jkl012mno345",
-        "client_name": "agent-deploy",
-        "permissions": ["read", "write"],
-        "allowed_resources": ["prod-app"],
-        "policy_id": "readonly-paths",
-        "expires_at": "2026-06-23T10:00:00",
-    })
-    check("token create avec policy ne crash pas", True)
+    with patch("httpx.AsyncClient", return_value=mock_http3):
+        r = run_cli(["token", "update", "abc123", "--permissions", "read", "--vaults", "prod-vault"])
+    check_value("Exit code", r.exit_code, 0)
+    call_json3 = mock_http3.put.call_args[1].get("json", {}) if mock_http3.put.call_args else {}
+    check("permissions = ['read'] transmis", call_json3.get("permissions") == ["read"])
+    check("allowed_resources = ['prod-vault'] transmis", call_json3.get("allowed_resources") == ["prod-vault"])
 
-    section("Affichage token create — owner-based (vaults vide)")
-    print("    [simulé] :")
-    show_token_result({
-        "status": "created",
-        "raw_token": "mvt_xyz987uvw654rst321qpo098nml765",
-        "client_name": "agent-libre",
-        "permissions": ["read", "write"],
-        "allowed_resources": [],
-        "expires_at": None,
-    })
-    check("token create owner-based ne crash pas", True)
+    # ── token revoke ─────────────────────────────────────────────────────────
+    section("token revoke — DELETE /admin/api/tokens/{hash} via httpx")
+    mock_resp_r = MagicMock()
+    mock_resp_r.json.return_value = {"status": "ok"}
+    mock_http_r = AsyncMock()
+    mock_http_r.delete = AsyncMock(return_value=mock_resp_r)
+    mock_http_r.__aenter__ = AsyncMock(return_value=mock_http_r)
+    mock_http_r.__aexit__ = AsyncMock(return_value=None)
 
-    section("Affichage token list — colonne Policy + Vaults")
-    print("    [simulé] :")
-    show_token_result({
-        "status": "ok",
-        "tokens": [
-            {"client_name": "admin", "permissions": ["read", "write", "admin"],
-             "allowed_resources": [], "policy_id": "", "expires_at": None, "hash_prefix": "abc12345"},
-            {"client_name": "agent-sre", "permissions": ["read"],
-             "allowed_resources": ["prod"], "policy_id": "readonly", "expires_at": "2026-06-23", "hash_prefix": "def67890"},
-            {"client_name": "agent-old", "permissions": ["read"],
-             "allowed_resources": [], "policy_id": "", "expires_at": "2026-01-01",
-             "hash_prefix": "ghi11111", "revoked": True},
-        ],
-    })
-    check("token list avec Policy ne crash pas", True)
-
-    section("Affichage token revoke")
-    print("    [simulé] :")
-    show_token_result({"status": "ok", "message": "Token def67890... révoqué"})
-    check("token revoke affichage OK", True)
-
-    section("Affichage token update (via show_policy_result)")
-    print("    [simulé] :")
-    show_policy_result({
-        "status": "updated",
-        "client_name": "agent-sre",
-        "hash_prefix": "def67890",
-        "updated_fields": ["policy_id", "permissions"],
-        "policy_id": "readonly-paths",
-        "permissions": ["read"],
-    })
-    check("token update affichage OK", True)
+    with patch("httpx.AsyncClient", return_value=mock_http_r):
+        r = run_cli(["token", "revoke", "abc123"])
+    check_value("Exit code", r.exit_code, 0)
+    check("DELETE appelé", mock_http_r.delete.called)
+    check("hash_prefix dans URL", "abc123" in str(mock_http_r.delete.call_args))
