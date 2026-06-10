@@ -261,6 +261,30 @@ Voir [scripts/README.md](scripts/README.md) pour la documentation complète du C
 
 ---
 
+## ⚙️ Variables d'environnement
+
+Copier `.env.example` → `.env` et adapter. Les variables sont groupées par domaine :
+
+| Groupe | Variables | Obligatoire |
+|--------|-----------|-------------|
+| **Serveur** | `MCP_SERVER_NAME`, `MCP_SERVER_PORT`, `MCP_ALLOWED_HOSTS` | Oui |
+| **Auth** | `ADMIN_BOOTSTRAP_KEY` | Oui |
+| **S3** | `S3_ENDPOINT_URL`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET_NAME`, `S3_REGION_NAME` | Oui |
+| **OpenBao** | `OPENBAO_ADDR`, `OPENBAO_SHARES`, `OPENBAO_THRESHOLD` | Oui |
+| **Storage sync** | `VAULT_S3_PREFIX`, `VAULT_S3_SYNC_INTERVAL` | Non |
+| **PKI** *(v0.5.x)* | `PKI_BASE_URL` | Non — override URL ACME en test Docker |
+| **Mission JWT** *(v0.6.0)* | `ENFORCE_MISSION_TOKEN_VALIDATION`, `MISSION_JWKS_URL`, `MISSION_TOKEN_AUD`, `MISSION_JWKS_CACHE_TTL`, `MISSION_STATUS_URL` | Non — standalone sans mcp-mission |
+| **CLI tokens** | `VAULT_WRAP_TOKEN`, `VAULT_MISSION_TOKEN` | Non — exporter avant la commande, jamais dans `.env` |
+
+> **Tokens sensibles CLI** : `VAULT_WRAP_TOKEN` et `VAULT_MISSION_TOKEN` ne doivent PAS être stockés dans `.env` — ils changent à chaque opération. Passer via `export` ou inline :
+> ```bash
+> VAULT_WRAP_TOKEN=hvs.CAES... mcp-vault secret consume op-123
+> ```
+
+Voir `.env.example` pour la documentation complète de chaque variable.
+
+---
+
 ## 🏗️ Architecture
 
 > 📐 **Documentation complète** : le dossier [`DESIGN/mcp-vault/`](DESIGN/mcp-vault/) contient la spécification détaillée ([ARCHITECTURE.md](DESIGN/mcp-vault/ARCHITECTURE.md) — vision, sécurité, SSH CA, policies, roadmap HSM) et la documentation technique ([TECHNICAL.md](DESIGN/mcp-vault/TECHNICAL.md) — modules, Docker, tests, dépendances).

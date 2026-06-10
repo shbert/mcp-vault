@@ -110,6 +110,26 @@ Utilise `pydantic-settings` pour charger la configuration depuis les variables d
 | `VAULT_S3_PREFIX`        | `_storage`                | Préfixe S3 pour le sync     |
 | `VAULT_S3_SYNC_INTERVAL` | `60`                      | Intervalle sync en secondes |
 | `PKI_BASE_URL`           | *(vide)*                  | Override URL base PKI (ACME directory, CDPs). Utile en test Docker : `http://mcp-vault:8030`. Doit être http(s)://. |
+| `ENFORCE_MISSION_TOKEN_VALIDATION` | `false` | `true` = hard-reject JWT dans secret_consume. `false` = log warning, continue (standalone compatible). |
+| `MISSION_JWKS_URL`       | *(vide)*                  | JWKS public mcp-mission (`/.well-known/jwks.json`). Vide = validation désactivée. |
+| `MISSION_TOKEN_AUD`      | *(vide)*                  | Audience attendue dans le JWT (anti-confused-deputy). Ex : `mcp-vault:prod:v1`. |
+| `MISSION_JWKS_CACHE_TTL` | `60`                      | TTL cache JWKS en secondes. |
+| `MISSION_JWKS_MAX_REFRESH_PER_MIN` | `3`             | Rate-limit refresh JWKS (anti-DoS). |
+| `MISSION_TOKEN_LEEWAY_SECONDS` | `10`                | Tolérance clock skew JWT en secondes. |
+| `MISSION_STATUS_URL`     | *(vide)*                  | Template URL statut mission mcp-mission (`{mission_id}` remplacé). Vide = vérification désactivée. |
+| `MISSION_STATUS_CACHE_TTL` | `5`                     | TTL cache statut mission en secondes (court — fail-close rapide). |
+
+**Variables CLI (NE PAS stocker dans `.env`)** :
+
+| Variable | Description |
+|----------|-------------|
+| `VAULT_WRAP_TOKEN` | Token de déballage OpenBao pour `secret consume` (single-use). |
+| `VAULT_MISSION_TOKEN` | JWT mission_token ES256 pour `secret consume` (TTL court). |
+
+Ces variables changent à chaque opération — les exporter avant la commande ou passer inline :
+```bash
+VAULT_WRAP_TOKEN=hvs.CAES... VAULT_MISSION_TOKEN=eyJ... mcp-vault secret consume op-123
+```
 
 ### 3.2 `s3_client.py` — Client S3 hybride
 

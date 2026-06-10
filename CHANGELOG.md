@@ -47,6 +47,17 @@ secret_consume(wrap_token, operation_id, mission_token) → secret_data
 - `_mission_status_lock` créé au niveau module (anti-race création lazy)
 - `rollback_consuming()` retourne bool + log si S3 fail
 
+#### CLI — tokens sensibles via variables d'environnement
+`secret consume` passe `wrap_token` et `mission_token` via `VAULT_WRAP_TOKEN` et
+`VAULT_MISSION_TOKEN` (pas en arguments positionnels — évite l'exposition dans
+`~/.bash_history`). Pattern identique à `MCP_TOKEN`/`ADMIN_BOOTSTRAP_KEY`.
+`.env.example` documenté avec les 8 groupes de variables.
+
+```bash
+VAULT_WRAP_TOKEN=hvs.CAES... VAULT_MISSION_TOKEN=eyJ... \
+mcp-vault secret consume op-123
+```
+
 #### Tests non-complaisant
 - `tests/test_jwt_validator.py` (24 tests) : contrôle positif + 11 variantes C18 rejetées (signature, exp, iss, aud, mission_id, algo, kid révoqué, token compact jamais divulgué, malformé) + cache/rate-limit + WrapRegistry extensions + secret_consume standalone/enforce
 
