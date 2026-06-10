@@ -1,7 +1,7 @@
 # Documentation Technique — MCP Vault
 
 > **Version** : 0.5.1 | **Date** : 2026-06-10 | **Auteur** : Cloud Temple
-> **Licence** : Apache 2.0 | **Statut** : ✅ Production-ready (audit V2.1 complété + PKI interne v0.5.0)
+> **Licence** : Apache 2.0 | **Statut** : ✅ Production-ready (audit V2.1 complété + PKI interne v0.5.1)
 
 ---
 
@@ -290,7 +290,7 @@ configurés pour un autre vault.
 **Suppression** : quand un vault est supprimé (`vault_delete`), le mount SSH CA
 est également supprimé. Les certificats déjà émis restent valides jusqu'à expiration.
 
-### 3.11b `vault/pki_ca.py` — PKI Certificate Authority *(v0.5.0)*
+### 3.11b `vault/pki_ca.py` — PKI Certificate Authority *(v0.5.1)*
 
 CA interne souveraine basée sur l'engine PKI d'OpenBao. CA globale (non par vault) — deux mounts réservés `_sys_pki_root/` (racine, TTL 10 ans) et `_sys_pki_int/` (intermédiaire, TTL 5 ans). Protégés contre `vault_delete` (mounts système).
 

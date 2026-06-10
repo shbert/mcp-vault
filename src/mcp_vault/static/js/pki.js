@@ -27,6 +27,10 @@ async function loadPki() {
         page.innerHTML = `<div class="error-banner">Erreur inventaire : ${esc(certs.message)}</div>`;
         return;
     }
+    if (roles.status === 'error') {
+        page.innerHTML = `<div class="error-banner">Erreur rôles ACME : ${esc(roles.message)}</div>`;
+        return;
+    }
 
     // Détails du rôle ACME principal (acme-servers)
     let roleDetail = null;
