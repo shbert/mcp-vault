@@ -20,7 +20,7 @@ from .display import (
     show_vault_result, show_secret_result,
     show_types_result, show_password_result,
     show_ssh_result, show_token_result,
-    show_policy_result, show_audit_result,
+    show_policy_result, show_audit_result, show_pki_result,
 )
 
 
@@ -525,6 +525,169 @@ def ssh_role_info_cmd(ctx, vault_id, role_name, output_json):
             show_json(result)
         else:
             show_ssh_result(result)
+    asyncio.run(_run())
+
+
+# =============================================================================
+# PKI Certificate Authority (groupe admin — issue #15)
+# =============================================================================
+
+@cli.group("pki")
+@click.pass_context
+def pki_group(ctx):
+    """🔐 PKI interne — CA OpenBao + serveur ACME.
+
+    \b
+    Sous-commandes : setup, ca-key, roles, role-info, certs, revoke, rotate.
+    """
+    pass
+
+
+@pki_group.command("setup")
+@click.option("--lab/--prod", default=True, help="Lab=CA self-signed, prod=CSR pour CA externe")
+@click.option("--domains", default="*.lesur.lan,lesur.lan", help="Domaines ACME autorisés (virgules)")
+@click.option("--ttl", default="720h", help="TTL max des certificats feuilles")
+@click.option("--json", "-j", "output_json", is_flag=True, help="Sortie JSON brute")
+@click.pass_context
+def pki_setup_cmd(ctx, lab, domains, ttl, output_json):
+    """Initialiser la PKI interne (CA racine + intermédiaire + ACME).
+
+    \b
+    Exemples :
+      pki setup --lab --domains '*.lesur.lan,lesur.lan'
+      pki setup --prod --domains 'mcp.cloud-temple.app' --ttl 720h
+    """
+    async def _run():
+        client = MCPClient(ctx.obj["url"], ctx.obj["token"])
+        result = await client.call_tool("pki_ca_setup", {
+            "lab_mode": lab,
+            "allowed_domains": domains,
+            "leaf_ttl": ttl,
+        })
+        if output_json:
+            show_json(result)
+        else:
+            show_pki_result(result)
+    asyncio.run(_run())
+
+
+@pki_group.command("ca-key")
+@click.option("--json", "-j", "output_json", is_flag=True, help="Sortie JSON brute")
+@click.pass_context
+def pki_ca_key_cmd(ctx, output_json):
+    """Afficher la CA racine PEM (empreinte SHA-256 + URL stable)."""
+    async def _run():
+        client = MCPClient(ctx.obj["url"], ctx.obj["token"])
+        result = await client.call_tool("pki_ca_public_key", {})
+        if output_json:
+            show_json(result)
+        else:
+            show_pki_result(result)
+    asyncio.run(_run())
+
+
+@pki_group.command("roles")
+@click.option("--json", "-j", "output_json", is_flag=True, help="Sortie JSON brute")
+@click.pass_context
+def pki_roles_cmd(ctx, output_json):
+    """Lister les rôles d'émission PKI."""
+    async def _run():
+        client = MCPClient(ctx.obj["url"], ctx.obj["token"])
+        result = await client.call_tool("pki_ca_list_roles", {})
+        if output_json:
+            show_json(result)
+        else:
+            show_pki_result(result)
+    asyncio.run(_run())
+
+
+@pki_group.command("role-info")
+@click.argument("role_name")
+@click.option("--json", "-j", "output_json", is_flag=True, help="Sortie JSON brute")
+@click.pass_context
+def pki_role_info_cmd(ctx, role_name, output_json):
+    """Détails d'un rôle d'émission PKI (domaines, TTL, flags TLS).
+
+    \b
+    Exemples :
+      pki role-info acme-servers
+    """
+    async def _run():
+        client = MCPClient(ctx.obj["url"], ctx.obj["token"])
+        result = await client.call_tool("pki_ca_role_info", {"role_name": role_name})
+        if output_json:
+            show_json(result)
+        else:
+            show_pki_result(result)
+    asyncio.run(_run())
+
+
+@pki_group.command("certs")
+@click.option("--limit", default=100, help="Nombre max de certificats")
+@click.option("--offset", default=0, help="Offset de pagination")
+@click.option("--json", "-j", "output_json", is_flag=True, help="Sortie JSON brute")
+@click.pass_context
+def pki_certs_cmd(ctx, limit, offset, output_json):
+    """Inventaire des certificats émis (serial, SANs, expiration, statut).
+
+    \b
+    Exemples :
+      pki certs
+      pki certs --limit 20 --offset 20
+    """
+    async def _run():
+        client = MCPClient(ctx.obj["url"], ctx.obj["token"])
+        result = await client.call_tool("pki_list_certs", {"limit": limit, "offset": offset})
+        if output_json:
+            show_json(result)
+        else:
+            show_pki_result(result)
+    asyncio.run(_run())
+
+
+@pki_group.command("revoke")
+@click.argument("serial_number")
+@click.option("--json", "-j", "output_json", is_flag=True, help="Sortie JSON brute")
+@click.pass_context
+def pki_revoke_cmd(ctx, serial_number, output_json):
+    """Révoquer un certificat et mettre à jour la CRL.
+
+    \b
+    Exemples :
+      pki revoke 12:34:ab:cd:ef:12:34:56
+    """
+    async def _run():
+        client = MCPClient(ctx.obj["url"], ctx.obj["token"])
+        result = await client.call_tool("pki_revoke_cert", {"serial_number": serial_number})
+        if output_json:
+            show_json(result)
+        else:
+            show_pki_result(result)
+    asyncio.run(_run())
+
+
+@pki_group.command("rotate")
+@click.option("--keep-old/--no-keep-old", default=True, help="Conserver l'ancien issuer")
+@click.option("--overlap", default="48h", help="Durée de chevauchement documentée")
+@click.option("--json", "-j", "output_json", is_flag=True, help="Sortie JSON brute")
+@click.pass_context
+def pki_rotate_cmd(ctx, keep_old, overlap, output_json):
+    """Rotation sans coupure de la CA intermédiaire.
+
+    \b
+    Les certificats existants restent valides si --keep-old (défaut).
+    Les nouvelles émissions utilisent le nouvel issuer immédiatement.
+    """
+    async def _run():
+        client = MCPClient(ctx.obj["url"], ctx.obj["token"])
+        result = await client.call_tool("pki_ca_rotate_intermediate", {
+            "keep_old_issuer": keep_old,
+            "overlap_ttl": overlap,
+        })
+        if output_json:
+            show_json(result)
+        else:
+            show_pki_result(result)
     asyncio.run(_run())
 
 

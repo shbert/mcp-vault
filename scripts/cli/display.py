@@ -595,3 +595,124 @@ def show_token_result(result: dict):
         return
 
     show_json(result)
+
+
+# =============================================================================
+# PKI Certificate Authority
+# =============================================================================
+
+def show_pki_result(result: dict):
+    """Affichage adaptatif selon le type de réponse PKI."""
+    status = result.get("status", "?")
+    if status == "error":
+        show_error(result.get("message", "Erreur PKI"))
+        return
+
+    # Setup : retourne root_mount + acme_directory
+    if "root_mount" in result and "acme_directory" in result:
+        lab = result.get("lab_mode", True)
+        show_success(f"PKI initialisée — mode {'lab' if lab else 'prod'}")
+        table = Table(show_header=False)
+        table.add_column("Champ", style="cyan bold", min_width=25)
+        table.add_column("Valeur")
+        table.add_row("CA Racine",       result.get("root_mount", "?"))
+        table.add_row("CA Intermédiaire", result.get("int_mount", "?"))
+        table.add_row("ACME Directory",  result.get("acme_directory", "?"))
+        table.add_row("CA Root URL",     result.get("root_pem_url", "?"))
+        table.add_row("CRL URL",         result.get("crl_url", "?"))
+        table.add_row("Expiration root", result.get("root_expires", "?"))
+        table.add_row("SHA-256 root",    result.get("root_fingerprint_sha256", "?")[:64] + "…" if len(result.get("root_fingerprint_sha256", "")) > 64 else result.get("root_fingerprint_sha256", "?"))
+        table.add_row("Domaines ACME",   ", ".join(result.get("allowed_domains", [])))
+        table.add_row("TTL feuille",     result.get("leaf_ttl", "?"))
+        table.add_row("EAB requis",      str(result.get("eab_required", False)))
+        if result.get("s3_sync_ok") is False:
+            table.add_row("[red]S3 sync[/red]", "[red]ÉCHEC — durabilité compromise[/red]")
+        console.print(table)
+        return
+
+    # CA Root PEM : retourne pem + sha256_fingerprint
+    if "pem" in result and "sha256_fingerprint" in result:
+        show_success(f"CA Racine — expire {result.get('expires', '?')}")
+        console.print(f"  [cyan]SHA-256[/cyan] : {result.get('sha256_fingerprint', '?')}")
+        console.print(f"  [cyan]URL[/cyan]    : {result.get('url', '?')}")
+        if result.get("usage"):
+            console.print(f"  [dim]💡 {result['usage']}[/dim]")
+        pem = result["pem"]
+        console.print(Panel(
+            pem[:300] + "\n…(tronqué)" if len(pem) > 300 else pem,
+            title="CA Root PEM", border_style="cyan",
+        ))
+        return
+
+    # Inventaire certs
+    if "certs" in result and "total" in result:
+        total = result.get("total", 0)
+        console.print(f"\n[bold]{total} certificat(s) émis[/bold]")
+        certs = result.get("certs", [])
+        if not certs:
+            console.print("  [dim](aucun certificat)[/dim]")
+            return
+        table = Table(show_header=True)
+        table.add_column("Série", style="cyan", min_width=20)
+        table.add_column("SANs")
+        table.add_column("Expiration")
+        table.add_column("Statut", min_width=8)
+        for c in certs:
+            sans = ", ".join(c.get("sans", [])) or "—"
+            exp  = c.get("not_after", "?")[:19].replace("T", " ") if c.get("not_after") else "?"
+            rev  = "[red]révoqué[/red]" if c.get("revoked") else "[green]actif[/green]"
+            table.add_row(c.get("serial", "?"), sans, exp, rev)
+        console.print(table)
+        return
+
+    # Révocation
+    if "serial_number" in result and "crl_updated" in result:
+        show_success(f"Certificat révoqué : {result['serial_number']}")
+        console.print(f"  CRL mise à jour : {result.get('crl_updated', False)}")
+        if result.get("s3_sync_ok") is False:
+            show_warning("S3 sync échouée — CRL peut être obsolète en S3")
+        return
+
+    # Rotation intermédiaire
+    if "new_issuer_id" in result:
+        show_success("Rotation intermédiaire effectuée")
+        table = Table(show_header=False)
+        table.add_column("Champ", style="cyan bold", min_width=22)
+        table.add_column("Valeur")
+        table.add_row("Ancien issuer", result.get("old_issuer_id", "?"))
+        table.add_row("Nouvel issuer", result.get("new_issuer_id", "?"))
+        table.add_row("Expiration",    result.get("new_expires", "?"))
+        table.add_row("Ancien gardé",  str(result.get("keep_old_issuer", True)))
+        if result.get("s3_sync_ok") is False:
+            table.add_row("[red]S3 sync[/red]", "[red]ÉCHEC[/red]")
+        console.print(table)
+        return
+
+    # Liste rôles
+    if "roles" in result and "count" in result:
+        n = result.get("count", 0)
+        console.print(f"\n[bold]{n} rôle(s) PKI[/bold]")
+        for r in result.get("roles", []):
+            console.print(f"  🔐 {r}")
+        return
+
+    # Détails rôle
+    if "role_name" in result and "allowed_domains" in result:
+        console.print(f"\n[bold]Rôle PKI : {result['role_name']}[/bold]")
+        table = Table(show_header=True)
+        table.add_column("Paramètre", style="cyan bold", min_width=28)
+        table.add_column("Valeur")
+        table.add_row("allowed_domains",           ", ".join(result.get("allowed_domains", [])))
+        table.add_row("allow_subdomains",          str(result.get("allow_subdomains", False)))
+        table.add_row("allow_wildcard_certificates", str(result.get("allow_wildcard_certificates", False)))
+        table.add_row("server_flag",               str(result.get("server_flag", False)))
+        table.add_row("client_flag",               str(result.get("client_flag", False)))
+        table.add_row("allow_ip_sans",             str(result.get("allow_ip_sans", False)))
+        table.add_row("allow_localhost",           str(result.get("allow_localhost", False)))
+        table.add_row("max_ttl",                   str(result.get("max_ttl", "")))
+        table.add_row("key_type",                  str(result.get("key_type", "")))
+        table.add_row("key_bits",                  str(result.get("key_bits", "")))
+        console.print(table)
+        return
+
+    show_json(result)
