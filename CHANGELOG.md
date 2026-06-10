@@ -1,5 +1,81 @@
 # Changelog — MCP Vault
 
+## [0.5.0] — 2026-06-10
+
+### PKI interne — CA OpenBao + serveur ACME (issue #15)
+
+Première release majeure post-v0.4.x : MCP Vault est désormais une **autorité de certification interne** pour l'écosystème Cloud Temple. Les WAF Caddy peuvent obtenir leurs certificats TLS via le protocole ACME standard, sans dépendance Internet ni CA publique.
+
+#### Architecture PKI (PR #16)
+- **`vault/pki_ca.py`** : CA racine + intermédiaire (OpenBao PKI engine), serveur ACME sur CA intermédiaire, rotation sans coupure (`rotate_intermediate`), révocation + CRL, inventaire paginé des certificats émis
+- **`pki_middleware.py`** : middleware ASGI couche externe non-auth — proxy transparent `/acme/*` → OpenBao + distribution CA (`/pki/ca/root.pem`, `/pki/ca/chain.pem`, `/pki/ca/crl.pem`)
+- **Mounts réservés** : `_sys_pki_root/` et `_sys_pki_int/` protégés contre `vault_delete` (double guard `spaces.py` + `server.py`, audit log)
+- **Sync S3 forcée** après `setup_pki_ca`, `revoke_cert`, `rotate_intermediate` (durabilité critique)
+- **Stack ASGI** : 6 couches — `PkiMiddleware → AdminMiddleware → HealthCheckMiddleware → AuthMiddleware → LoggingMiddleware → FastMCP`
+
+#### Sécurité PKI (corrections Codex)
+- Anti-traversal sur les paths ACME (`/../..` bloqué), validation `query_string`, `follow_redirects=False` (pas de SSRF)
+- Validation regex `serial_number` (`^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2})+$`) dans `revoke_cert`
+- `asyncio.Lock` sur `setup_pki_ca` (race condition multi-appel)
+- Validation format FQDN/wildcard des `allowed_domains`
+- Vérification retour `upload_to_s3()` (bool) sur toutes les mutations critiques
+
+#### 7 nouveaux outils MCP (PR #16)
+- `pki_ca_setup(lab_mode, allowed_domains, leaf_ttl)` — admin
+- `pki_ca_public_key()` — CA racine PEM + SHA-256
+- `pki_ca_list_roles()` — liste des rôles ACME
+- `pki_ca_role_info(role_name)` — détails rôle
+- `pki_list_certs(limit, offset)` — inventaire paginé
+- `pki_revoke_cert(serial_number)` — admin
+- `pki_ca_rotate_intermediate(keep_old_issuer, overlap_ttl)` — admin
+
+Total outils MCP : **24 → 31**
+
+#### Admin SPA /admin — section PKI (PR #17)
+- Nouvelles routes REST : `GET /admin/api/pki/status`, `POST /admin/api/pki/setup`, `GET /admin/api/pki/certs`, `POST /admin/api/pki/certs/{serial}/revoke`, `POST /admin/api/pki/ca/rotate`
+- Sidebar "PKI / TLS" (admins uniquement)
+- Page PKI : statut CA (expiration racine/intermédiaire, empreinte SHA-256, ACME on/off), URLs de distribution copiables, inventaire certs avec révocation, modal setup
+- Sécurité XSS : `JSON.stringify()` sur onclick serial et URL (pas de `esc()` insuffisant)
+- `/pki/certs` requiert `is_admin` (inventaire = données sensibles)
+
+#### CLI groupe `pki` (PR #18, `Closes #15`)
+- **Click** : `pki setup`, `pki ca-key`, `pki roles`, `pki role-info <role>`, `pki certs`, `pki revoke <serial>`, `pki rotate`
+- **Shell interactif** : `cmd_pki()` + `SHELL_COMMANDS["pki"]`
+- **Display** : `show_pki_result()` affichage adaptatif (setup, ca-key, roles, inventaire, révocation, rotation)
+- Options typées (`type=int` sur `--limit`/`--offset`), robustesse arg manquant
+
+### Maintenance & Qualité (issues #12, #13, #14)
+
+**#12 Tests comportementaux** (PR #19) : `TestAdminApiCodeStructure` — 3 tests à recherche textuelle réécrits en tests ASGI comportementaux :
+- `test_whoami_returns_injected_client_name` : GET /whoami prouve l'injection ContextVar à l'exécution
+- `test_contextvar_reset_after_request` : ContextVar resetté après requête (prouve le `finally`)
+- `test_create_policy_created_by_uses_token_client_name` : mock store.create, vérifie `created_by=client_name`
+
+**#14 Dashboard SPA** (PR #20) : compteur de tokens actifs excluait les révoqués mais pas les expirés. Fix : `.filter(t => !t.revoked && !t.expired)`.
+
+**#13 Race S3** (PR #21) : limitation last-write-wins documentée dans `_save()` de `TokenStore` et `PolicyStore` (acceptable V1, single-instance). V2 : S3 conditional write ETag/CAS.
+
+### Fichiers modifiés (résumé)
+- `src/mcp_vault/vault/pki_ca.py` *(nouveau)*
+- `src/mcp_vault/pki_middleware.py` *(nouveau)*
+- `src/mcp_vault/server.py` — +7 outils MCP PKI + PkiMiddleware + guard vault_delete
+- `src/mcp_vault/admin/api.py` — +5 routes REST PKI
+- `src/mcp_vault/vault/spaces.py` — guard is_reserved_mount
+- `src/mcp_vault/lifecycle.py` — check PKI au démarrage
+- `src/mcp_vault/auth/token_store.py` — LIMITATION V1 documentée
+- `src/mcp_vault/auth/policies.py` — LIMITATION V1 documentée
+- `src/mcp_vault/static/admin.html` — page PKI + modal
+- `src/mcp_vault/static/js/app.js` — sidebar PKI + routing
+- `src/mcp_vault/static/js/pki.js` *(nouveau)*
+- `src/mcp_vault/static/js/dashboard.js` — filtre tokens expirés
+- `scripts/cli/commands.py` — groupe pki (7 commandes)
+- `scripts/cli/shell.py` — cmd_pki + dispatcher
+- `scripts/cli/display.py` — show_pki_result
+- `tests/test_pki.py` *(nouveau)* — 22 tests
+- `tests/test_pki_admin.py` *(nouveau)* — 12 tests
+- `tests/cli/test_pki.py` *(nouveau)* — tests aide + rendus
+- `tests/test_admin_context.py` — réécriture TestAdminApiCodeStructure
+
 ## [0.4.16] — 2026-06-08
 
 ### Tests & Security — Résiduels finaux (suite de l'audit complet)

@@ -2,7 +2,7 @@
 
 > CLI complet pour interagir avec le serveur MCP Vault — Click + Rich + shell interactif.
 
-> 💡 **Console web** : toutes les fonctionnalités du CLI sont également disponibles dans la **console admin SPA** accessible à `/admin` (dashboard, vaults, secrets, SSH CA, policies, tokens, audit, générateur de mot de passe, référence des 14 types). L'interface guide l'utilisateur avec des tooltips et de l'aide contextuelle.
+> 💡 **Console web** : toutes les fonctionnalités du CLI sont également disponibles dans la **console admin SPA** accessible à `/admin` (dashboard, vaults, secrets, SSH CA, PKI/TLS, policies, tokens, audit, générateur de mot de passe, référence des 14 types). L'interface guide l'utilisateur avec des tooltips et de l'aide contextuelle.
 
 ---
 
@@ -121,6 +121,33 @@ python scripts/mcp_cli.py ssh roles mon-vault
 python scripts/mcp_cli.py ssh role-info mon-vault sre-role
 ```
 
+### PKI — Autorité de Certification interne *(v0.5.0, admin)*
+
+```bash
+# Initialiser la PKI (CA racine + intermédiaire + serveur ACME)
+python scripts/mcp_cli.py pki setup --lab --domains '*.lesur.lan,lesur.lan'
+python scripts/mcp_cli.py pki setup --prod --domains 'mcp.cloud-temple.app' --ttl 720h
+
+# Consulter l'état et la CA racine
+python scripts/mcp_cli.py pki ca-key         # PEM + SHA-256 + URL stable
+python scripts/mcp_cli.py pki roles          # Rôles ACME configurés
+python scripts/mcp_cli.py pki role-info acme-servers
+
+# Inventaire des certificats émis
+python scripts/mcp_cli.py pki certs
+python scripts/mcp_cli.py pki certs --limit 20
+
+# Révoquer un certificat
+python scripts/mcp_cli.py pki revoke 12:34:ab:cd:ef:12:34:56
+
+# Rotation de la CA intermédiaire sans coupure
+python scripts/mcp_cli.py pki rotate
+python scripts/mcp_cli.py pki rotate --no-keep-old
+```
+
+> Les WAF Caddy s'enrôlent via `acme_ca https://vault.example.com/acme/directory`.
+> La racine de confiance est disponible à `/pki/ca/root.pem` (non-auth).
+
 ### Tokens (admin)
 
 ```bash
@@ -216,7 +243,7 @@ scripts/
 └── cli/
     ├── __init__.py   # Config : charge .env, expose BASE_URL et TOKEN
     ├── client.py     # MCPClient : Streamable HTTP via SDK MCP
-    ├── commands.py   # 7 groupes Click : health, about, vault, secret, ssh, token, shell
+    ├── commands.py   # 8 groupes Click : health, about, vault, secret, ssh, pki, token, shell
     ├── display.py    # Affichage Rich : panels, tables, syntax highlighting
     └── shell.py      # Shell interactif : prompt-toolkit, history, auto-complete
 ```
