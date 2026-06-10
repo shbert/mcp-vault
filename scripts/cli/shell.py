@@ -327,14 +327,24 @@ async def cmd_pki(client, args="", json_output=False):
         i = 1
         while i < len(parts):
             if parts[i] == "--limit" and i + 1 < len(parts):
-                limit = int(parts[i + 1]); i += 2
+                try:
+                    limit = max(1, int(parts[i + 1]))
+                except ValueError:
+                    show_error("--limit doit être un entier positif"); return
+                i += 2
             elif parts[i] == "--offset" and i + 1 < len(parts):
-                offset = int(parts[i + 1]); i += 2
+                try:
+                    offset = max(0, int(parts[i + 1]))
+                except ValueError:
+                    show_error("--offset doit être un entier positif"); return
+                i += 2
             else:
                 i += 1
         result = await client.call_tool("pki_list_certs", {"limit": limit, "offset": offset})
 
-    elif op == "revoke" and len(parts) >= 2:
+    elif op == "revoke":
+        if len(parts) < 2:
+            show_warning("Usage: pki revoke <serial_number>"); return
         result = await client.call_tool("pki_revoke_cert", {"serial_number": parts[1]})
 
     elif op == "rotate":

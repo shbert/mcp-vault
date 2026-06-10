@@ -623,8 +623,8 @@ def pki_role_info_cmd(ctx, role_name, output_json):
 
 
 @pki_group.command("certs")
-@click.option("--limit", default=100, help="Nombre max de certificats")
-@click.option("--offset", default=0, help="Offset de pagination")
+@click.option("--limit", default=100, type=int, help="Nombre max de certificats")
+@click.option("--offset", default=0, type=int, help="Offset de pagination")
 @click.option("--json", "-j", "output_json", is_flag=True, help="Sortie JSON brute")
 @click.pass_context
 def pki_certs_cmd(ctx, limit, offset, output_json):
