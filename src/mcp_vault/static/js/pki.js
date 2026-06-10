@@ -18,6 +18,11 @@ async function loadPki() {
     }
 
     const certs = await api('/pki/certs');
+    if (certs.status === 'error') {
+        page.innerHTML = `<div class="error-banner">Erreur inventaire : ${esc(certs.message)}</div>`;
+        return;
+    }
+
     page.innerHTML = _renderPkiPage(status, certs);
 }
 
@@ -40,8 +45,9 @@ function _renderPkiPage(s, certs) {
         const rev  = c.revoked
             ? '<span class="badge badge-danger">révoqué</span>'
             : '<span class="badge badge-ok">actif</span>';
+        // SÉCURITÉ : JSON.stringify évite le XSS onclick (esc() n'échappe pas les quotes simples)
         const revokeBtn = (!c.revoked && isAdmin())
-            ? `<button class="btn btn-sm btn-danger" onclick="pkiRevoke('${esc(c.serial)}')">Révoquer</button>`
+            ? `<button class="btn btn-sm btn-danger" onclick="pkiRevoke(${JSON.stringify(c.serial)})">Révoquer</button>`
             : '';
         return `<tr>
             <td class="mono-small">${esc(c.serial)}</td>
@@ -134,7 +140,7 @@ async function pkiRevoke(serial) {
     if (result.status === 'ok') {
         loadPki();
     } else {
-        alert('Erreur : ' + (result.message || 'échec révocation'));
+        _pkiShowError('Erreur révocation : ' + (result.message || 'échec'));
     }
 }
 
@@ -145,11 +151,20 @@ async function pkiRotate() {
         body: JSON.stringify({ keep_old_issuer: true, overlap_ttl: '48h' }),
     });
     if (result.status === 'ok') {
-        alert(`Rotation effectuée.\nNouvel issuer : ${result.new_issuer_id}\nExpiration : ${fmtDate(result.new_expires)}`);
+        _pkiShowError('Rotation effectuée — nouvel issuer : ' + (result.new_issuer_id || '?'), 'info');
         loadPki();
     } else {
-        alert('Erreur rotation : ' + (result.message || '—'));
+        _pkiShowError('Erreur rotation : ' + (result.message || '—'));
     }
+}
+
+function _pkiShowError(message, type = 'error') {
+    const page = document.getElementById('page-pki');
+    const div = document.createElement('div');
+    div.className = type === 'info' ? 'success-banner' : 'error-banner';
+    div.textContent = message;  // textContent = safe, pas de XSS
+    page.prepend(div);
+    setTimeout(() => div.remove(), 6000);
 }
 
 async function doPkiSetup() {

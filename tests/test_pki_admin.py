@@ -130,13 +130,26 @@ class TestPkiAdminRoutes:
         assert code == 200
         assert body["status"] == "ok"
 
-    def test_pki_certs_returns_list(self):
-        """GET /admin/api/pki/certs → 200 avec liste."""
+    def test_pki_certs_requires_admin(self):
+        """GET /admin/api/pki/certs → 403 si non-admin (inventaire = données sensibles)."""
+        code, body = self._call_admin("/admin/api/pki/certs", token_info=_READ_TOKEN_INFO)
+        assert code == 403
+
+    def test_pki_certs_returns_list_for_admin(self):
+        """GET /admin/api/pki/certs → 200 avec liste pour admin."""
         mock_result = {"status": "ok", "total": 0, "certs": []}
         with patch("mcp_vault.vault.pki_ca.list_issued_certs", new_callable=AsyncMock, return_value=mock_result):
             code, body = self._call_admin("/admin/api/pki/certs")
         assert code == 200
         assert "certs" in body
+
+    def test_pki_revoke_rejects_invalid_serial_in_router(self):
+        """POST /admin/api/pki/certs/{serial_invalide}/revoke → 400 avant même revoke_cert."""
+        code, body = self._call_admin(
+            "/admin/api/pki/certs/../../evil/revoke", "POST", b"{}"
+        )
+        assert code == 400
+        assert body["status"] == "error"
 
     def test_pki_revoke_requires_admin(self):
         """POST /admin/api/pki/certs/{serial}/revoke → 403 si non-admin."""

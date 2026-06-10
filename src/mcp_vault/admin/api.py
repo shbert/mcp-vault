@@ -289,12 +289,18 @@ async def _handle_admin_routes(scope, receive, send, mcp, token_info):
         return await _api_pki_setup(send, body)
 
     if path == "/admin/api/pki/certs" and method == "GET":
+        if not is_admin:
+            return await _json_response(send, 403, {"status": "error", "message": "Permission admin requise"})
         return await _api_pki_list_certs(send)
 
     if path.startswith("/admin/api/pki/certs/") and method == "POST" and path.endswith("/revoke"):
         if not is_admin:
             return await _json_response(send, 403, {"status": "error", "message": "Permission admin requise"})
         serial = path[len("/admin/api/pki/certs/"):-len("/revoke")]
+        # Défense en profondeur : validation format serial avant transmission à pki_ca
+        import re as _re
+        if not _re.match(r'^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2})+$', serial):
+            return await _json_response(send, 400, {"status": "error", "message": "Serial invalide"})
         return await _api_pki_revoke_cert(send, serial)
 
     if path == "/admin/api/pki/ca/rotate" and method == "POST":
