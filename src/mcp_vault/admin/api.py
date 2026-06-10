@@ -278,6 +278,31 @@ async def _handle_admin_routes(scope, receive, send, mcp, token_info):
         name = path.split("/")[-1]
         return await _api_revoke_token(send, name)
 
+    # --- PKI Certificate Authority ---
+    if path == "/admin/api/pki/status" and method == "GET":
+        return await _api_pki_status(send)
+
+    if path == "/admin/api/pki/setup" and method == "POST":
+        if not is_admin:
+            return await _json_response(send, 403, {"status": "error", "message": "Permission admin requise"})
+        body = await _read_body(receive)
+        return await _api_pki_setup(send, body)
+
+    if path == "/admin/api/pki/certs" and method == "GET":
+        return await _api_pki_list_certs(send)
+
+    if path.startswith("/admin/api/pki/certs/") and method == "POST" and path.endswith("/revoke"):
+        if not is_admin:
+            return await _json_response(send, 403, {"status": "error", "message": "Permission admin requise"})
+        serial = path[len("/admin/api/pki/certs/"):-len("/revoke")]
+        return await _api_pki_revoke_cert(send, serial)
+
+    if path == "/admin/api/pki/ca/rotate" and method == "POST":
+        if not is_admin:
+            return await _json_response(send, 403, {"status": "error", "message": "Permission admin requise"})
+        body = await _read_body(receive)
+        return await _api_pki_rotate(send, body)
+
     return await _json_response(send, 404, {"status": "error", "message": f"Unknown admin route: {path}"})
 
 
@@ -880,3 +905,60 @@ async def _json_response(send, status, data):
         ],
     })
     await send({"type": "http.response.body", "body": body})
+
+
+# =============================================================================
+# PKI Certificate Authority — Endpoints
+# =============================================================================
+
+async def _api_pki_status(send):
+    """GET /admin/api/pki/status — État de la PKI."""
+    from ..vault.pki_ca import get_pki_status
+    result = await get_pki_status()
+    code = 200 if result.get("status") in ("ok", "not_initialized") else 500
+    await _json_response(send, code, result)
+
+
+async def _api_pki_setup(send, body):
+    """POST /admin/api/pki/setup — Initialiser la PKI (admin)."""
+    from ..vault.pki_ca import setup_pki_ca
+    try:
+        data = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        data = {}
+    lab_mode = data.get("lab_mode", True)
+    raw_domains = data.get("allowed_domains")
+    allowed_domains = [d.strip() for d in raw_domains.split(",") if d.strip()] if isinstance(raw_domains, str) else raw_domains
+    leaf_ttl = data.get("leaf_ttl", "720h")
+    result = await setup_pki_ca(lab_mode, allowed_domains, leaf_ttl)
+    await _json_response(send, 200 if result.get("status") == "ok" else 500, result)
+
+
+async def _api_pki_list_certs(send):
+    """GET /admin/api/pki/certs — Inventaire des certificats émis."""
+    from ..vault.pki_ca import list_issued_certs
+    result = await list_issued_certs(limit=200)
+    await _json_response(send, 200, result)
+
+
+async def _api_pki_revoke_cert(send, serial):
+    """POST /admin/api/pki/certs/{serial}/revoke — Révoquer un certificat (admin)."""
+    from ..vault.pki_ca import revoke_cert
+    result = await revoke_cert(serial)
+    msg = result.get("message", "")
+    code = 200 if result.get("status") == "ok" else (400 if "invalide" in msg else 500)
+    await _json_response(send, code, result)
+
+
+async def _api_pki_rotate(send, body):
+    """POST /admin/api/pki/ca/rotate — Rotation de la CA intermédiaire (admin)."""
+    from ..vault.pki_ca import rotate_intermediate
+    try:
+        data = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        data = {}
+    result = await rotate_intermediate(
+        keep_old_issuer=data.get("keep_old_issuer", True),
+        overlap_ttl=data.get("overlap_ttl", "48h"),
+    )
+    await _json_response(send, 200 if result.get("status") == "ok" else 500, result)

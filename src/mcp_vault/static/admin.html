@@ -53,6 +53,7 @@
             <div id="page-policies" class="hidden"></div>
             <div id="page-tokens" class="hidden"></div>
             <div id="page-activity" class="hidden"></div>
+            <div id="page-pki" class="hidden"></div>
         </div>
     </div>
 </div>
@@ -240,6 +241,35 @@
     </div>
 </div>
 
+<!-- ═══════════════ MODAL — PKI Setup ═══════════════ -->
+<div id="modalPkiSetup" class="modal-overlay">
+    <div class="modal">
+        <h2>🔐 Initialiser la PKI interne</h2>
+        <div class="form-group">
+            <label for="pkiLabMode">Mode</label>
+            <select id="pkiLabMode">
+                <option value="true">Lab (CA racine self-signed)</option>
+                <option value="false">Prod (CSR pour CA externe)</option>
+            </select>
+            <div class="help-text">Lab : CA racine générée localement dans OpenBao. Prod : vous devrez signer le CSR avec votre CA externe.</div>
+        </div>
+        <div class="form-group">
+            <label for="pkiDomains">Domaines autorisés <span class="field-required">*</span></label>
+            <input type="text" id="pkiDomains" value="*.lesur.lan,lesur.lan" placeholder="*.lesur.lan, lesur.lan">
+            <div class="help-text">Domaines pour lesquels ACME peut émettre des certificats (séparés par des virgules).</div>
+        </div>
+        <div class="form-group">
+            <label for="pkiLeafTtl">TTL des certificats feuilles</label>
+            <input type="text" id="pkiLeafTtl" value="720h" placeholder="720h">
+            <div class="help-text">Durée de vie max des certificats émis (ex: 720h = 30 jours). Renouvellement automatique par Caddy.</div>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-ghost" onclick="closeModal('modalPkiSetup')">Annuler</button>
+            <button class="btn btn-primary" onclick="doPkiSetup()">Initialiser</button>
+        </div>
+    </div>
+</div>
+
 <!-- ═══════════════ MODAL — SSH CA Setup ═══════════════ -->
 <div id="modalSshSetup" class="modal-overlay">
     <div class="modal">
@@ -308,6 +338,7 @@
 <script src="/admin/static/js/tokens.js"></script>
 <script src="/admin/static/js/policies.js"></script>
 <script src="/admin/static/js/activity.js"></script>
+<script src="/admin/static/js/pki.js"></script>
 <script src="/admin/static/js/app.js"></script>
 </body>
 </html>
