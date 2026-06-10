@@ -44,6 +44,10 @@ _TOOL_LABELS = {
     "policy_create": "Création policy", "policy_list": "Liste policies",
     "policy_get": "Détails policy", "policy_delete": "Suppression policy",
     "token_update": "Modification token", "audit_log": "Consultation audit",
+    "pki_ca_setup": "Setup PKI CA", "pki_ca_public_key": "Clé publique CA PKI",
+    "pki_ca_list_roles": "Liste rôles PKI", "pki_ca_role_info": "Détails rôle PKI",
+    "pki_list_certs": "Inventaire certs PKI", "pki_revoke_cert": "Révocation cert PKI",
+    "pki_ca_rotate_intermediate": "Rotation intermédiaire PKI",
 }
 
 def _r(tool: str, result: dict, vault_id: str = "", detail: str = "") -> dict:
@@ -296,6 +300,12 @@ async def vault_delete(vault_id: str, confirm: bool = False) -> dict:
 
     if not confirm:
         return {"status": "error", "message": "confirm=True requis pour supprimer un vault"}
+
+    # SÉCURITÉ PKI : double guard (spaces.py en fait de même, défense en profondeur)
+    from .vault.pki_ca import is_reserved_mount
+    if is_reserved_mount(vault_id):
+        return {"status": "error", "error": "reserved_mount",
+                "message": f"'{vault_id}' est un mount système PKI protégé et ne peut pas être supprimé."}
 
     return _r("vault_delete", await delete_space(vault_id), vault_id)
 
@@ -862,6 +872,154 @@ async def ssh_ca_role_info(vault_id: str, role_name: str) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# OUTILS MCP — PKI Certificate Authority (Phase 5 — issue #15)
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+async def pki_ca_setup(lab_mode: bool = True,
+                       allowed_domains: str = "*.lesur.lan,lesur.lan",
+                       leaf_ttl: str = "720h") -> dict:
+    """
+    Configure la PKI interne complète (CA racine + intermédiaire + ACME).
+
+    Idempotent. Le serveur ACME est activé sur la CA intermédiaire.
+    En lab, la racine est self-signed (opération entièrement locale).
+    En prod, générer le CSR avec lab_mode=False et importer le cert signé.
+
+    Args:
+        lab_mode: True = CA racine self-signed (lab/dev). False = CSR pour CA externe (prod).
+        allowed_domains: Domaines autorisés par le rôle ACME, séparés par des virgules.
+        leaf_ttl: TTL max des certificats feuilles (ex: 720h = 30 jours).
+    """
+    from .auth.context import check_admin_permission, check_policy
+    from .vault.pki_ca import setup_pki_ca
+
+    policy_err = check_policy("pki_ca_setup")
+    if policy_err:
+        return policy_err
+    admin_err = check_admin_permission()
+    if admin_err:
+        return admin_err
+
+    domains_list = [d.strip() for d in allowed_domains.split(",") if d.strip()]
+    return _r("pki_ca_setup", await setup_pki_ca(lab_mode, domains_list, leaf_ttl))
+
+
+@mcp.tool()
+async def pki_ca_public_key() -> dict:
+    """
+    Retourne la CA racine PEM avec son empreinte SHA-256 et l'URL stable.
+
+    Utiliser l'URL stable pour les clients httpx (bundle CA) et le Caddyfile.
+    """
+    from .auth.context import check_policy
+    from .vault.pki_ca import get_ca_root_pem
+
+    policy_err = check_policy("pki_ca_public_key")
+    if policy_err:
+        return policy_err
+
+    return _r("pki_ca_public_key", await get_ca_root_pem())
+
+
+@mcp.tool()
+async def pki_ca_list_roles() -> dict:
+    """Liste les rôles d'émission PKI configurés sur la CA intermédiaire."""
+    from .auth.context import check_policy
+    from .vault.pki_ca import list_pki_roles
+
+    policy_err = check_policy("pki_ca_list_roles")
+    if policy_err:
+        return policy_err
+
+    return _r("pki_ca_list_roles", await list_pki_roles())
+
+
+@mcp.tool()
+async def pki_ca_role_info(role_name: str) -> dict:
+    """
+    Détails d'un rôle d'émission PKI (domaines autorisés, TTL, flags TLS).
+
+    Args:
+        role_name: Nom du rôle (ex: acme-servers)
+    """
+    from .auth.context import check_policy
+    from .vault.pki_ca import get_pki_role_info
+
+    policy_err = check_policy("pki_ca_role_info")
+    if policy_err:
+        return policy_err
+
+    return _r("pki_ca_role_info", await get_pki_role_info(role_name))
+
+
+@mcp.tool()
+async def pki_list_certs(limit: int = 100, offset: int = 0) -> dict:
+    """
+    Inventaire paginé des certificats émis (serials, SANs, expiration, révocation).
+
+    Args:
+        limit: Nombre max de certificats retournés (défaut 100).
+        offset: Offset de pagination.
+    """
+    from .auth.context import check_policy
+    from .vault.pki_ca import list_issued_certs
+
+    policy_err = check_policy("pki_list_certs")
+    if policy_err:
+        return policy_err
+
+    return _r("pki_list_certs", await list_issued_certs(limit, offset))
+
+
+@mcp.tool()
+async def pki_revoke_cert(serial_number: str) -> dict:
+    """
+    Révoque un certificat et force la mise à jour de la CRL.
+
+    Args:
+        serial_number: Numéro de série du certificat à révoquer (format hex, ex: 12:34:ab:cd:...).
+    """
+    from .auth.context import check_admin_permission, check_policy
+    from .vault.pki_ca import revoke_cert
+
+    policy_err = check_policy("pki_revoke_cert")
+    if policy_err:
+        return policy_err
+    admin_err = check_admin_permission()
+    if admin_err:
+        return admin_err
+
+    return _r("pki_revoke_cert", await revoke_cert(serial_number))
+
+
+@mcp.tool()
+async def pki_ca_rotate_intermediate(keep_old_issuer: bool = True,
+                                      overlap_ttl: str = "48h") -> dict:
+    """
+    Rotation sans coupure de la CA intermédiaire.
+
+    Génère un nouveau CSR, signe avec la CA racine, importe comme nouvel issuer.
+    L'ancien issuer reste valide si keep_old_issuer=True (certs existants honorés).
+
+    Args:
+        keep_old_issuer: Conserver l'ancien issuer pour valider les certs existants.
+        overlap_ttl: Durée de chevauchement documentée (non appliquée automatiquement).
+    """
+    from .auth.context import check_admin_permission, check_policy
+    from .vault.pki_ca import rotate_intermediate
+
+    policy_err = check_policy("pki_ca_rotate_intermediate")
+    if policy_err:
+        return policy_err
+    admin_err = check_admin_permission()
+    if admin_err:
+        return admin_err
+
+    return _r("pki_ca_rotate_intermediate", await rotate_intermediate(keep_old_issuer, overlap_ttl))
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # OUTILS MCP — Token Management (Phase 8b)
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -1007,13 +1165,15 @@ def create_app():
 
     from .auth.middleware import AuthMiddleware, LoggingMiddleware, HealthCheckMiddleware
     from .admin.middleware import AdminMiddleware
+    from .pki_middleware import PkiMiddleware
 
-    # Stack ASGI (ordre d'application : Admin → Health → Auth → Logging → MCP)
+    # Stack ASGI (ordre d'application : Pki → Admin → Health → Auth → Logging → MCP)
     app = mcp.streamable_http_app()
     app = LoggingMiddleware(app)
     app = AuthMiddleware(app, mcp)
     app = HealthCheckMiddleware(app)
     app = AdminMiddleware(app, mcp)
+    app = PkiMiddleware(app)  # couche la plus externe — /acme/* et /pki/ca/* sans auth
 
     return app
 

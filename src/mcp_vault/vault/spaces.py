@@ -363,6 +363,15 @@ async def delete_space(vault_id: str) -> dict:
     - Tous les secrets et métadonnées (KV v2 mount)
     - Le mount SSH CA si configuré (ssh-ca-{vault_id})
     """
+    # SÉCURITÉ PKI : les mounts _sys_pki_* sont hors du cycle de vie vault_delete
+    from .pki_ca import is_reserved_mount
+    if is_reserved_mount(vault_id):
+        return {
+            "status": "error",
+            "error": "reserved_mount",
+            "message": f"Le vault '{vault_id}' est un mount système PKI protégé et ne peut pas être supprimé via cette API.",
+        }
+
     client = get_hvac_client()
     if not client:
         return {"status": "error", "message": "OpenBao non connecté"}

@@ -82,6 +82,17 @@ async def vault_startup() -> bool:
     except Exception as e:
         logger.error(f"❌ Wrap Registry : {e}")
 
+    # ── 1e. PKI CA (vérification état au démarrage) ───────────────
+    logger.info("🔐 Vérification PKI CA...")
+    try:
+        from .vault.pki_ca import is_pki_initialized
+        if is_pki_initialized():
+            logger.info("✅ PKI CA déjà initialisée.")
+        else:
+            logger.info("ℹ️  PKI CA non initialisée — utilisez pki_ca_setup pour démarrer.")
+    except Exception as e:
+        logger.warning(f"⚠️ PKI CA check : {e}")
+
     # ── 2. Vérifier les données locales (Docker volume) ───────────
     data_dir = Path(settings.openbao_data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
