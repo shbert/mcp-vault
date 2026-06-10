@@ -118,7 +118,7 @@ function _urlRow(label, url) {
     return `<div class="url-row">
         <span class="url-label">${esc(label)}</span>
         <code class="url-value">${esc(url)}</code>
-        <button class="btn-copy" onclick="navigator.clipboard.writeText('${esc(url)}')" title="Copier">⎘</button>
+        <button class="btn-copy" onclick="navigator.clipboard.writeText(${JSON.stringify(url)})" title="Copier">⎘</button>
     </div>`;
 }
 
