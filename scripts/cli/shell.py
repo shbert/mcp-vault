@@ -16,7 +16,7 @@ from .display import (
     show_vault_result, show_secret_result,
     show_types_result, show_password_result,
     show_ssh_result, show_token_result,
-    show_policy_result, show_audit_result,
+    show_policy_result, show_audit_result, show_pki_result,
 )
 
 
@@ -33,6 +33,7 @@ SHELL_COMMANDS = {
     "policy":     "policy <op> [args] — create, list, get, delete",
     "token":      "token <op> [args] — create, list, update, revoke",
     "audit":      "audit [options] — journal d'audit complet",
+    "pki":        "pki <op> [args] — setup, ca-key, roles, role-info, certs, revoke, rotate",
     "quit":       "Quitter le shell",
 }
 
@@ -290,6 +291,99 @@ async def cmd_ssh(client, args="", json_output=False):
         show_json(result)
     else:
         show_ssh_result(result)
+
+
+PKI_OPS = ("setup", "ca-key", "roles", "role-info", "certs", "revoke", "rotate")
+
+
+async def cmd_pki(client, args="", json_output=False):
+    parts = args.strip().split()
+    if not parts or parts[0] not in PKI_OPS:
+        show_warning("Usage: pki <op> [args]")
+        show_warning("")
+        show_warning("  pki setup --lab --domains '*.lesur.lan,lesur.lan'")
+        show_warning("  pki ca-key")
+        show_warning("  pki roles")
+        show_warning("  pki role-info <role_name>")
+        show_warning("  pki certs [--limit N]")
+        show_warning("  pki revoke <serial>")
+        show_warning("  pki rotate [--keep-old]")
+        return
+
+    op = parts[0]
+
+    if op == "ca-key":
+        result = await client.call_tool("pki_ca_public_key", {})
+
+    elif op == "roles":
+        result = await client.call_tool("pki_ca_list_roles", {})
+
+    elif op == "role-info" and len(parts) >= 2:
+        result = await client.call_tool("pki_ca_role_info", {"role_name": parts[1]})
+
+    elif op == "certs":
+        limit = 100
+        offset = 0
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--limit" and i + 1 < len(parts):
+                try:
+                    limit = max(1, int(parts[i + 1]))
+                except ValueError:
+                    show_error("--limit doit être un entier positif"); return
+                i += 2
+            elif parts[i] == "--offset" and i + 1 < len(parts):
+                try:
+                    offset = max(0, int(parts[i + 1]))
+                except ValueError:
+                    show_error("--offset doit être un entier positif"); return
+                i += 2
+            else:
+                i += 1
+        result = await client.call_tool("pki_list_certs", {"limit": limit, "offset": offset})
+
+    elif op == "revoke":
+        if len(parts) < 2:
+            show_warning("Usage: pki revoke <serial_number>"); return
+        result = await client.call_tool("pki_revoke_cert", {"serial_number": parts[1]})
+
+    elif op == "rotate":
+        keep_old = "--no-keep-old" not in parts
+        overlap = "48h"
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--overlap" and i + 1 < len(parts):
+                overlap = parts[i + 1]; i += 2
+            else:
+                i += 1
+        result = await client.call_tool("pki_ca_rotate_intermediate", {
+            "keep_old_issuer": keep_old, "overlap_ttl": overlap,
+        })
+
+    elif op == "setup":
+        lab = "--prod" not in parts
+        domains = "*.lesur.lan,lesur.lan"
+        ttl = "720h"
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--domains" and i + 1 < len(parts):
+                domains = parts[i + 1]; i += 2
+            elif parts[i] == "--ttl" and i + 1 < len(parts):
+                ttl = parts[i + 1]; i += 2
+            else:
+                i += 1
+        result = await client.call_tool("pki_ca_setup", {
+            "lab_mode": lab, "allowed_domains": domains, "leaf_ttl": ttl,
+        })
+
+    else:
+        show_warning(f"Usage: pki {op} ...")
+        return
+
+    if json_output:
+        show_json(result)
+    else:
+        show_pki_result(result)
 
 
 POLICY_OPS = ("create", "list", "get", "delete")
@@ -591,6 +685,8 @@ async def run_shell(url: str, token: str):
                 await cmd_token(client, args, json_output)
             elif command == "audit":
                 await cmd_audit(client, args, json_output)
+            elif command == "pki":
+                await cmd_pki(client, args, json_output)
             else:
                 show_warning(f"Commande inconnue: '{command}'. Tapez 'help'.")
 
