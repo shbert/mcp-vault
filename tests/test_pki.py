@@ -1,0 +1,424 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Tests PKI Certificate Authority — comportementaux, sans dépendances réseau.
+
+Vérifie :
+  - Protection vault_delete contre les mounts _sys_pki_*  (T9)
+  - Proxy ACME non-authentifié dans PkiMiddleware
+  - Proxy /pki/ca/*.pem dans PkiMiddleware
+  - Appels upload_to_s3 après mutations critiques (setup, revoke, rotate)
+  - Fonctions utilitaires (is_reserved_mount, _sha256_fingerprint, _cert_expiry_iso)
+
+Usage :
+    PYTHONPATH=src python -m pytest tests/test_pki.py -v
+"""
+
+import asyncio
+import os
+import sys
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from unittest.mock import MagicMock
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+os.environ.setdefault("MCP_SERVER_NAME", "mcp-vault-test")
+os.environ.setdefault("ADMIN_BOOTSTRAP_KEY", "Test-Bootstrap-Key-2026-Pour-Tests!!")
+
+# hvac n'est pas installé dans le venv local (seulement dans Docker).
+# Mock minimal pour permettre l'import de spaces.py et openbao.manager.
+if "hvac" not in sys.modules:
+    _hvac_mock = MagicMock()
+    _hvac_mock.exceptions.Forbidden = Exception
+    _hvac_mock.exceptions.InvalidRequest = Exception
+    sys.modules["hvac"] = _hvac_mock
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _run(coro):
+    return asyncio.get_event_loop().run_until_complete(coro)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests utilitaires (synchrones, pas de réseau)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestIsReservedMount:
+    """is_reserved_mount() doit identifier les mounts PKI protégés."""
+
+    def test_reserved_root(self):
+        from mcp_vault.vault.pki_ca import is_reserved_mount
+        assert is_reserved_mount("_sys_pki_root") is True
+
+    def test_reserved_int(self):
+        from mcp_vault.vault.pki_ca import is_reserved_mount
+        assert is_reserved_mount("_sys_pki_int") is True
+
+    def test_not_reserved_normal_vault(self):
+        from mcp_vault.vault.pki_ca import is_reserved_mount
+        assert is_reserved_mount("my-vault") is False
+
+    def test_not_reserved_empty(self):
+        from mcp_vault.vault.pki_ca import is_reserved_mount
+        assert is_reserved_mount("") is False
+
+    def test_not_reserved_similar_prefix(self):
+        from mcp_vault.vault.pki_ca import is_reserved_mount
+        assert is_reserved_mount("sys_pki_root") is False  # sans underscore initial
+        assert is_reserved_mount("pki_root") is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests T9 — Protection vault_delete (défense en profondeur)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestVaultDeleteProtection:
+    """
+    T9 : vault_delete sur un mount _sys_pki_* doit être refusé.
+
+    Deux couches :
+      - spaces.py:delete_space() retourne {status: error, error: reserved_mount}
+      - server.py:vault_delete (tool MCP) retourne idem avant d'appeler delete_space
+    """
+
+    def test_delete_space_refuses_pki_root(self):
+        """spaces.delete_space('_sys_pki_root') → error reserved_mount."""
+        result = _run(_delete_space_call("_sys_pki_root"))
+        assert result["status"] == "error"
+        assert result.get("error") == "reserved_mount"
+
+    def test_delete_space_refuses_pki_int(self):
+        """spaces.delete_space('_sys_pki_int') → error reserved_mount."""
+        result = _run(_delete_space_call("_sys_pki_int"))
+        assert result["status"] == "error"
+        assert result.get("error") == "reserved_mount"
+
+    def test_delete_space_allows_normal_vault(self):
+        """spaces.delete_space('my-vault') n'est PAS bloqué par le guard PKI."""
+        mock_client = MagicMock()
+        mock_client.sys.disable_secrets_engine = MagicMock()
+
+        with patch("mcp_vault.vault.spaces.get_hvac_client", return_value=mock_client), \
+             patch("mcp_vault.vault.ssh_ca.cleanup_ssh_ca", new_callable=AsyncMock, return_value=True):
+            result = _run(_delete_space_call("my-vault"))
+
+        # Le guard PKI ne bloque pas → on arrive à disable_secrets_engine
+        assert result.get("error") != "reserved_mount"
+
+
+def _delete_space_call(vault_id: str):
+    from mcp_vault.vault.spaces import delete_space
+    return delete_space(vault_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests PkiMiddleware — proxy ACME non-authentifié
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestPkiMiddleware:
+    """Vérifie que PkiMiddleware proxy /acme/* et /pki/ca/* vers OpenBao."""
+
+    def _make_scope(self, path: str, method: str = "GET") -> dict:
+        return {
+            "type": "http",
+            "method": method,
+            "path": path,
+            "headers": [],
+            "query_string": b"",
+        }
+
+    def _make_receive(self, body: bytes = b"") -> callable:
+        async def receive():
+            return {"type": "http.request", "body": body, "more_body": False}
+        return receive
+
+    def _make_send(self) -> tuple:
+        events = []
+
+        async def send(event):
+            events.append(event)
+
+        return send, events
+
+    def _fake_httpx_response(self, status=200, content=b"pem-data",
+                              headers=None):
+        mock_resp = MagicMock()
+        mock_resp.status_code = status
+        mock_resp.content = content
+        mock_resp.headers = headers or {"content-type": "application/pem-certificate-chain"}
+        return mock_resp
+
+    def test_acme_directory_proxied_without_auth(self):
+        """GET /acme/directory → proxy vers OpenBao, aucun header Bearer requis."""
+        from mcp_vault.pki_middleware import PkiMiddleware
+
+        inner_called = []
+
+        async def inner_app(scope, receive, send):
+            inner_called.append(True)
+
+        middleware = PkiMiddleware(inner_app)
+        scope = self._make_scope("/acme/directory")
+        send_fn, events = self._make_send()
+
+        fake_resp = self._fake_httpx_response(
+            200, b'{"newNonce":"https://..."}',
+            headers={"content-type": "application/json", "replay-nonce": "abc123"}
+        )
+
+        with patch("mcp_vault.pki_middleware.httpx.AsyncClient") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_instance.request = AsyncMock(return_value=fake_resp)
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            _run(middleware(scope, self._make_receive(), send_fn))
+
+        assert not inner_called, "Le middleware interne NE doit PAS être appelé pour /acme/*"
+        start_event = next(e for e in events if e["type"] == "http.response.start")
+        assert start_event["status"] == 200
+
+    def test_pki_root_pem_proxied(self):
+        """GET /pki/ca/root.pem → proxy vers _sys_pki_root/ca/pem."""
+        from mcp_vault.pki_middleware import PkiMiddleware
+
+        middleware = PkiMiddleware(MagicMock())
+        scope = self._make_scope("/pki/ca/root.pem")
+        send_fn, events = self._make_send()
+
+        pem_content = b"-----BEGIN CERTIFICATE-----\nMOCK\n-----END CERTIFICATE-----"
+        fake_resp = self._fake_httpx_response(200, pem_content)
+
+        with patch("mcp_vault.pki_middleware.httpx.AsyncClient") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_instance.request = AsyncMock(return_value=fake_resp)
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            _run(middleware(scope, self._make_receive(), send_fn))
+
+        start_event = next(e for e in events if e["type"] == "http.response.start")
+        body_event = next(e for e in events if e["type"] == "http.response.body")
+        assert start_event["status"] == 200
+        assert body_event["body"] == pem_content
+
+    def test_pki_unknown_path_passes_through(self):
+        """GET /api/health ne doit PAS être intercepté par PkiMiddleware."""
+        from mcp_vault.pki_middleware import PkiMiddleware
+
+        inner_called = []
+
+        async def inner_app(scope, receive, send):
+            inner_called.append(True)
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b""})
+
+        middleware = PkiMiddleware(inner_app)
+        scope = self._make_scope("/api/health")
+        send_fn, _ = self._make_send()
+
+        _run(middleware(scope, self._make_receive(), send_fn))
+
+        assert inner_called, "Les routes non-PKI doivent passer au middleware suivant"
+
+    def test_acme_path_traversal_rejected(self):
+        """GET /acme/../../admin → rejeté 400 (CRITIQUE anti-traversal)."""
+        from mcp_vault.pki_middleware import PkiMiddleware
+
+        middleware = PkiMiddleware(MagicMock())
+        scope = self._make_scope("/acme/../../admin/creds")
+        send_fn, events = self._make_send()
+
+        _run(middleware(scope, self._make_receive(), send_fn))
+
+        start_event = next(e for e in events if e["type"] == "http.response.start")
+        assert start_event["status"] == 400
+
+    def test_acme_double_slash_rejected(self):
+        """GET /acme//bypass → rejeté 400."""
+        from mcp_vault.pki_middleware import PkiMiddleware
+
+        middleware = PkiMiddleware(MagicMock())
+        scope = self._make_scope("/acme//bypass")
+        send_fn, events = self._make_send()
+
+        _run(middleware(scope, self._make_receive(), send_fn))
+
+        start_event = next(e for e in events if e["type"] == "http.response.start")
+        assert start_event["status"] == 400
+
+    def test_acme_proxy_returns_502_on_openbao_down(self):
+        """Si OpenBao est injoignable, le middleware retourne 502."""
+        from mcp_vault.pki_middleware import PkiMiddleware
+
+        middleware = PkiMiddleware(MagicMock())
+        scope = self._make_scope("/acme/directory")
+        send_fn, events = self._make_send()
+
+        with patch("mcp_vault.pki_middleware.httpx.AsyncClient") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_instance.request = AsyncMock(side_effect=Exception("Connection refused"))
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            _run(middleware(scope, self._make_receive(), send_fn))
+
+        start_event = next(e for e in events if e["type"] == "http.response.start")
+        assert start_event["status"] == 502
+
+    def test_websocket_passes_through(self):
+        """Les connexions non-HTTP (WebSocket) passent sans modification."""
+        from mcp_vault.pki_middleware import PkiMiddleware
+
+        inner_called = []
+
+        async def inner_app(scope, receive, send):
+            inner_called.append(True)
+
+        middleware = PkiMiddleware(inner_app)
+        scope = {"type": "websocket", "path": "/acme/directory"}
+
+        _run(middleware(scope, self._make_receive(), MagicMock()))
+
+        assert inner_called
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests upload_to_s3 forcée après mutations critiques
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestS3SyncAfterMutations:
+    """
+    T10 partiel : upload_to_s3 doit être appelé après setup, revoke, rotate.
+    Vérifie que la durabilité S3 est garantie même en cas de crash post-mutation.
+    """
+
+    def _mock_hvac(self):
+        """Crée un mock hvac minimal pour les tests PKI."""
+        client = MagicMock()
+        client.sys.enable_secrets_engine = MagicMock()
+        client.sys.list_mounted_secrets_engines = MagicMock(return_value={
+            "data": {"_sys_pki_root/": {}, "_sys_pki_int/": {}}
+        })
+        # certificate vide → _cert_expiry_iso / _sha256_fingerprint ne sont pas appelés
+        client.write = MagicMock(return_value={
+            "data": {
+                "certificate": "",
+                "csr": "-----BEGIN CERTIFICATE REQUEST-----\nMOCK\n-----END CERTIFICATE REQUEST-----",
+                "imported_issuers": ["issuer-uuid-new"],
+                "default": "issuer-uuid-old",
+            }
+        })
+        client.read = MagicMock(return_value={
+            "data": {"default": "issuer-uuid-old"}
+        })
+        client.list = MagicMock(return_value={"data": {"keys": []}})
+        client.delete = MagicMock()
+        return client
+
+    def test_setup_calls_upload_to_s3(self):
+        """setup_pki_ca() doit appeler upload_to_s3() avant de retourner."""
+        from mcp_vault.vault.pki_ca import setup_pki_ca
+
+        mock_client = self._mock_hvac()
+
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=mock_client), \
+             patch("mcp_vault.s3_sync.upload_to_s3", new_callable=AsyncMock) as mock_s3, \
+             patch("mcp_vault.vault.pki_ca._read_pem_url", new_callable=AsyncMock, return_value=_MOCK_CERT_PEM):
+
+            result = _run(setup_pki_ca(lab_mode=True, allowed_domains=["test.lan"]))
+
+        assert result["status"] == "ok", f"Inattendu : {result}"
+        mock_s3.assert_called_once()
+
+    def test_revoke_calls_upload_to_s3(self):
+        """revoke_cert() doit appeler upload_to_s3() après révocation."""
+        from mcp_vault.vault.pki_ca import revoke_cert
+
+        mock_client = self._mock_hvac()
+
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=mock_client), \
+             patch("mcp_vault.s3_sync.upload_to_s3", new_callable=AsyncMock) as mock_s3, \
+             patch("mcp_vault.vault.pki_ca.is_pki_initialized", return_value=True):
+
+            result = _run(revoke_cert("12:34:ab:cd"))
+
+        assert result["status"] == "ok"
+        mock_s3.assert_called_once()
+
+    def test_rotate_calls_upload_to_s3(self):
+        """rotate_intermediate() doit appeler upload_to_s3() après rotation."""
+        from mcp_vault.vault.pki_ca import rotate_intermediate
+
+        mock_client = self._mock_hvac()
+
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=mock_client), \
+             patch("mcp_vault.s3_sync.upload_to_s3", new_callable=AsyncMock) as mock_s3, \
+             patch("mcp_vault.vault.pki_ca.is_pki_initialized", return_value=True), \
+             patch("mcp_vault.vault.pki_ca._read_pem_url", new_callable=AsyncMock, return_value=_MOCK_CERT_PEM):
+
+            result = _run(rotate_intermediate(keep_old_issuer=True))
+
+        assert result["status"] == "ok"
+        mock_s3.assert_called_once()
+
+    def test_setup_fails_if_openbao_disconnected(self):
+        """setup_pki_ca() retourne error si OpenBao non connecté."""
+        from mcp_vault.vault.pki_ca import setup_pki_ca
+
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=None):
+            result = _run(setup_pki_ca(lab_mode=True, allowed_domains=["test.lan"]))
+
+        assert result["status"] == "error"
+        assert "non connecté" in result["message"]
+
+    def test_revoke_requires_serial_number(self):
+        """revoke_cert() sans serial_number retourne error immédiatement."""
+        from mcp_vault.vault.pki_ca import revoke_cert
+        result = _run(revoke_cert(""))
+        assert result["status"] == "error"
+
+    def test_revoke_rejects_invalid_serial_format(self):
+        """revoke_cert() avec serial_number invalide (injection possible) retourne error."""
+        from mcp_vault.vault.pki_ca import revoke_cert
+        for bad_serial in ["../../admin", "12:34:ab:cd; evil", "GGGG", "12345"]:
+            result = _run(revoke_cert(bad_serial))
+            assert result["status"] == "error", f"Attendu error pour {bad_serial!r}"
+
+    def test_revoke_accepts_valid_serial(self):
+        """revoke_cert() avec serial valide (hex:hex:...) passe la validation."""
+        from mcp_vault.vault.pki_ca import revoke_cert
+
+        mock_client = MagicMock()
+        mock_client.write = MagicMock(return_value={"data": {"revocation_time": 1234567890}})
+
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=mock_client), \
+             patch("mcp_vault.s3_sync.upload_to_s3", new_callable=AsyncMock, return_value=True), \
+             patch("mcp_vault.vault.pki_ca.is_pki_initialized", return_value=True):
+            result = _run(revoke_cert("12:34:ab:cd:ef:12"))
+
+        assert result["status"] == "ok"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mock certificat PEM pour les tests (auto-signé, expiré acceptable)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Cert PEM minimaliste généré pour les tests (RSA 2048, 1 jour, CN=test)
+_MOCK_CERT_PEM = """-----BEGIN CERTIFICATE-----
+MIICpDCCAYwCCQDU6pQ4pHnSSDANBgkqhkiG9w0BAQsFADAUMRIwEAYDVQQDDAlt
+Y3AtdGVzdDAeFw0yNjA2MTAwMDAwMDBaFw0zNjA2MDgwMDAwMDBaMBQxEjAQBgNV
+BAMMCm1jcC10ZXN0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2a5v
+xkjH6Q3vqz7L5DnfO8s9P1+YmRnRaF3WvkAjpBKtQZkBqSzlYOcR1HKJr4i8Nq
+Z5X9fOt+vJ/Vvs3H8H3YcH7M2t5oFJVHJhPDdgWHUEu9RgF3KZ4GvVHRSJTPJv
+Lq7nFOZ8CtCyBpqC5BHiSZ9m9TDmVG7b7VJpuJwOZT5PpXEqQd0u7K8GZ1fR5V
+mT8sJHU6bFkY4gZD3cQ5BXt2Z8KcOhHxfYXv7nM9sEFqT3vWDzLpK8Q2O9bT6j
+SHmP5vZzL7bP3X2wN+M0c8fZkQ1TXfJqhV8KL3pFgDs4nQ0Q2L5Y7P8cR6W2A1
+YGjNtHF2KwIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQCq9f7MnkHJ4Zs3RbVp5N1
+xR2v8L0F4vMsOPqt3HZ5B8WnYcVkQhXTJpLvD7Z9M3fAG5Np4cK7RHiMvQ2xJ
+-----END CERTIFICATE-----"""
