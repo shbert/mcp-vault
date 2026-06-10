@@ -15,6 +15,7 @@ Usage :
 
 import os
 import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -308,50 +309,97 @@ class TestAuthContextPermissions:
 
 class TestAdminApiCodeStructure:
     """
-    Tests structurels — vérifie que le fix est bien présent dans le code source.
-    Pas de dépendance runtime, juste de l'inspection AST/texte.
+    Tests comportementaux — vérifie les invariants d'api.py à l'exécution,
+    sans inspection de code source ni recherche textuelle.
     """
 
-    def test_api_imports_contextvar(self):
-        """api.py doit importer current_token_info depuis auth.context."""
-        import ast
-        from pathlib import Path
+    def _call_admin(self, path, method="GET", body=b"", token_info=None):
+        """Helper ASGI : appelle handle_admin_api et retourne (status, body_dict)."""
+        import asyncio, json
+        from mcp_vault.admin.api import handle_admin_api
 
-        api_path = Path(__file__).parent.parent / "src" / "mcp_vault" / "admin" / "api.py"
-        source = api_path.read_text()
-        tree = ast.parse(source)
+        if token_info is None:
+            token_info = {"client_name": "test-admin", "permissions": ["admin"], "allowed_resources": []}
 
-        # Chercher l'import de current_token_info
-        found = False
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                if node.module and "context" in node.module:
-                    names = [alias.name for alias in node.names]
-                    if "current_token_info" in names:
-                        found = True
-                        break
-        assert found, "api.py doit importer current_token_info depuis auth.context"
+        scope = {
+            "type": "http", "method": method, "path": path,
+            "headers": [(b"authorization", b"Bearer test-tok")],
+            "query_string": b"",
+        }
+        events = []
 
-    def test_api_sets_contextvar_in_handler(self):
-        """handle_admin_api doit appeler current_token_info.set()."""
-        from pathlib import Path
+        async def receive():
+            return {"type": "http.request", "body": body, "more_body": False}
 
-        api_path = Path(__file__).parent.parent / "src" / "mcp_vault" / "admin" / "api.py"
-        source = api_path.read_text()
+        async def send(event):
+            events.append(event)
 
-        assert "current_token_info.set(" in source, \
-            "handle_admin_api doit injecter le ContextVar via .set()"
-        assert "current_token_info.reset(" in source, \
-            "handle_admin_api doit reset le ContextVar dans un finally"
+        with patch("mcp_vault.admin.api._get_token_info", return_value=token_info):
+            asyncio.get_event_loop().run_until_complete(
+                handle_admin_api(scope, receive, send, None)
+            )
 
-    def test_api_create_policy_uses_get_current_client_name(self):
-        """_api_create_policy doit utiliser get_current_client_name() et non 'admin' hardcodé."""
-        from pathlib import Path
+        start = next(e for e in events if e["type"] == "http.response.start")
+        body_ev = next(e for e in events if e["type"] == "http.response.body")
+        return start["status"], json.loads(body_ev["body"])
 
-        api_path = Path(__file__).parent.parent / "src" / "mcp_vault" / "admin" / "api.py"
-        source = api_path.read_text()
+    def test_whoami_returns_injected_client_name(self):
+        """
+        GET /admin/api/whoami retourne le client_name du token injecté dans le ContextVar.
 
-        assert 'created_by="admin"' not in source, \
-            "_api_create_policy ne doit plus avoir created_by='admin' hardcodé"
-        assert "get_current_client_name()" in source, \
-            "_api_create_policy doit appeler get_current_client_name()"
+        Prouve que handle_admin_api injecte bien current_token_info avant de router :
+        si le ContextVar n'était pas injecté, whoami retournerait "anonymous".
+        """
+        token_info = {"client_name": "agent-xyz", "permissions": ["read"], "allowed_resources": []}
+        code, body = self._call_admin("/admin/api/whoami", token_info=token_info)
+        assert code == 200
+        assert body.get("client_name") == "agent-xyz", (
+            "whoami doit retourner le client_name du token injecté dans le ContextVar, "
+            f"obtenu : {body.get('client_name')!r}"
+        )
+
+    def test_contextvar_reset_after_request(self):
+        """
+        Le ContextVar current_token_info est resetté après chaque requête (finally).
+
+        Prouve que handle_admin_api utilise un finally pour reset — sinon le ContextVar
+        d'une requête contaminerait les requêtes suivantes dans le même thread.
+        """
+        from mcp_vault.auth.context import current_token_info, get_current_client_name
+
+        # Avant la requête : ContextVar non défini → "anonymous"
+        assert get_current_client_name() == "anonymous"
+
+        token_info = {"client_name": "requete-test", "permissions": ["read"], "allowed_resources": []}
+        self._call_admin("/admin/api/whoami", token_info=token_info)
+
+        # Après la requête : ContextVar doit être resetté → retour à "anonymous"
+        assert get_current_client_name() == "anonymous", (
+            "Le ContextVar doit être resetté après la requête (finally dans handle_admin_api)"
+        )
+
+    def test_create_policy_created_by_uses_token_client_name(self):
+        """
+        POST /admin/api/policies crée la policy avec created_by = client_name du token.
+
+        Prouve que _api_create_policy appelle get_current_client_name() et non "admin"
+        hardcodé : si le client s'appelle "agent-creator", la policy doit avoir
+        created_by="agent-creator".
+        """
+        from unittest.mock import MagicMock, patch
+
+        mock_store = MagicMock()
+        mock_store.create.return_value = {"status": "created", "policy_id": "test-pol"}
+
+        token_info = {"client_name": "agent-creator", "permissions": ["admin"], "allowed_resources": []}
+        body = b'{"policy_id": "test-pol", "description": "test"}'
+
+        with patch("mcp_vault.auth.policies.get_policy_store", return_value=mock_store):
+            code, resp = self._call_admin("/admin/api/policies", "POST", body, token_info)
+
+        assert code == 201
+        call_kwargs = mock_store.create.call_args[1]
+        assert call_kwargs.get("created_by") == "agent-creator", (
+            f"created_by doit être 'agent-creator', obtenu : {call_kwargs.get('created_by')!r} — "
+            "vérifier que _api_create_policy utilise get_current_client_name()"
+        )
