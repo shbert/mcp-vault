@@ -121,7 +121,7 @@ def _base_url() -> str:
     """
     settings = get_settings()
     if settings.pki_base_url:
-        return settings.pki_base_url.rstrip("/")
+        return settings.pki_base_url_validated
     hosts = settings.allowed_hosts_list
     loopback = {"127.0.0.1", "localhost", "::1"}
     fqdn = next((h for h in hosts if h not in loopback), None)
@@ -196,7 +196,7 @@ async def setup_pki_ca(lab_mode: bool = True,
                 )
                 root_cert_pem = root_resp.get("data", {}).get("certificate", "") if root_resp else ""
             except Exception as e:
-                if "issuer name already in use" in str(e).lower() or "already in use" in str(e).lower():
+                if "issuer name already in use" in str(e).lower():
                     logger.info("ℹ️  CA racine déjà générée — skip génération (idempotent)")
                 else:
                     raise
@@ -242,7 +242,7 @@ async def setup_pki_ca(lab_mode: bool = True,
                 if new_issuer_id:
                     client.write(f"{_INT_MOUNT}/config/issuers", default=new_issuer_id)
             except Exception as e:
-                if "issuer name already in use" in str(e).lower() or "already in use" in str(e).lower():
+                if "issuer name already in use" in str(e).lower():
                     logger.info("ℹ️  CA intermédiaire déjà générée — skip génération (idempotent)")
                 else:
                     raise

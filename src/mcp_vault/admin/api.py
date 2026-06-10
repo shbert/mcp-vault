@@ -288,6 +288,9 @@ async def _handle_admin_routes(scope, receive, send, mcp, token_info):
         body = await _read_body(receive)
         return await _api_pki_setup(send, body)
 
+    # Rôles PKI — non-secret (configuration de l'autorité ACME), accessible à tout token valide
+    # pour permettre le diagnostic sans droits admin. Les données exposées sont les domaines
+    # autorisés, les flags TLS, les TTL — aucune clé privée ni secret.
     if path == "/admin/api/pki/roles" and method == "GET":
         return await _api_pki_list_roles(send)
 

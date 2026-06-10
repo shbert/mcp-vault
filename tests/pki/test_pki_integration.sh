@@ -197,8 +197,9 @@ _sep "T1 — Caddy caddy-test s'enrôle via ACME (HTTP-01)"
 
 # Copier la CA root dans caddy-test pour qu'il puisse vérifier le serveur ACME
 if [[ -n "$ROOT_PEM" ]] && echo "$ROOT_PEM" | grep -q "BEGIN CERTIFICATE"; then
+  # Utiliser printf + hérédoc pour éviter l'injection shell via le contenu PEM
   docker compose -f tests/pki/docker-compose.test-pki.yml exec -T caddy-test \
-    sh -c "echo '$ROOT_PEM' > /usr/local/share/ca-certificates/mcp-vault-ca.crt && update-ca-certificates 2>/dev/null || true" 2>/dev/null || true
+    sh -c 'mkdir -p /data && cat > /data/ca-root.pem' <<< "$ROOT_PEM" 2>/dev/null || true
 
   # Recharger le Caddyfile avec acme_ca configuré
   docker compose -f tests/pki/docker-compose.test-pki.yml exec -T caddy-test \

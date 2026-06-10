@@ -55,7 +55,18 @@ class Settings(BaseSettings):
     # URL publique de base pour les CDP ACME, CRL et cluster path OpenBao PKI.
     # Si vide (défaut) : déduite automatiquement du premier FQDN non-loopback
     # de mcp_allowed_hosts. Override utile en test Docker (ex: http://mcp-vault:8030).
+    # Doit commencer par http:// ou https:// — validé au démarrage.
     pki_base_url: str = ""
+
+    @property
+    def pki_base_url_validated(self) -> str:
+        """Retourne pki_base_url validé ou lève ValueError si malformé."""
+        url = self.pki_base_url.strip()
+        if url and not url.startswith(("http://", "https://")):
+            raise ValueError(
+                f"PKI_BASE_URL invalide : '{url}' — doit commencer par http:// ou https://"
+            )
+        return url.rstrip("/")
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
