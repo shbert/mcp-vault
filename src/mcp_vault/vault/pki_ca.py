@@ -47,6 +47,8 @@ _PKI_SETUP_LOCK: Optional[asyncio.Lock] = None
 
 
 def _get_setup_lock() -> asyncio.Lock:
+    # ⚠️ Lock per-process (asyncio) : NE FONCTIONNE QU'EN SINGLE-WORKER.
+    # Pour multi-worker (uvicorn workers > 1), utiliser un verrou distribué.
     global _PKI_SETUP_LOCK
     if _PKI_SETUP_LOCK is None:
         _PKI_SETUP_LOCK = asyncio.Lock()
