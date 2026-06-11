@@ -1,11 +1,14 @@
 # Rapport d'Audit de Sécurité — MCP Vault
 
-**Version auditée :** v0.4.0  
-**Version courante :** v0.4.9  
+**Version auditée :** v0.4.0 (audit V2.1)  
+**Version courante :** v0.6.1  
 **Audit externe :** White-box V2.1, revue de code multi-passe (v2 + v3) + revue par pair POC externe  
 **Audit interne :** Cline (Opus), v0.2.0 puis v0.3.3  
 **Date de consolidation :** 26 Mars 2026  
-**Composants couverts :** Serveur MCP (24 outils), Auth/Policies, WAF Caddy+Coraza, Docker/S3/Crypto, Admin API+SPA
+**Composants couverts :** Serveur MCP (24 outils au moment de l'audit V2.1 ; 35 outils en v0.6.1), Auth/Policies, WAF Caddy+Coraza, Docker/S3/Crypto, Admin API+SPA
+
+> **Audits post-V2.1** (hors périmètre du présent rapport, revus séparément via Codex multi-passe) :
+> PKI interne CA + ACME (v0.5.x), JIT Wrap Broker + consommation médiée C18 anti-confused-deputy (issue #26, v0.6.0), hardening C18 — singleton JWT + binding complet tenant_id/aud (issue #29, v0.6.1).
 
 ---
 
