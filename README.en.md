@@ -1,14 +1,14 @@
 # 🔐 MCP Vault
 
-> **Secure secrets management for AI agents — OpenBao embedded**
+> **Secure secret management for AI agents — embedded OpenBao**
 
 > 🇫🇷 [Version française](README.md)
 
-MCP Vault is an [MCP](https://modelcontextprotocol.io/) server that provides a secrets vault for AI agents and missions. It embeds [OpenBao](https://openbao.org/) (open-source fork of HashiCorp Vault, Linux Foundation) as its encryption engine.
+MCP Vault is an [MCP](https://modelcontextprotocol.io/) server that provides a secret vault for AI agents and missions. It embeds [OpenBao](https://openbao.org/) (open-source fork of HashiCorp Vault, Linux Foundation) as its encryption engine.
 
 **Think 1Password, but for your AI agents.**
 
-### 📸 Admin Console
+### 📸 Admin console
 
 |               Dashboard                |          Vaults & Secrets           |          Audit & Alerts            |
 | :------------------------------------: | :---------------------------------: | :--------------------------------: |
@@ -18,43 +18,43 @@ MCP Vault is an [MCP](https://modelcontextprotocol.io/) server that provides a s
 
 ## 📖 Documentation
 
-| Document                                                     | Description                                                                                                                              |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| [**ARCHITECTURE.md**](DESIGN/mcp-vault/ARCHITECTURE.md)      | Full specification — vision, 5-layer ASGI architecture, vaults, SSH CA, MCP policies (6 ready-to-use examples), unseal key security (3 factors), HSM roadmap |
-| [**TECHNICAL.md**](DESIGN/mcp-vault/TECHNICAL.md)            | Technical documentation — 14 source modules, data model, Docker, 312 e2e tests, dependencies, roadmap                                   |
-| [**SECURITY_AUDIT.md**](DESIGN/mcp-vault/SECURITY_AUDIT.md)  | Consolidated security audit report — 60 V2.1 findings, 28 fixed, 13 residual documented                                                 |
-| [**scripts/README.md**](scripts/README.md)                   | Complete CLI guide — 7 command groups, interactive shell, examples                                                                        |
-| [**tests/README.md**](tests/README.md)                       | Test execution guide — 4 levels, ~600 tests, commands for auditors                                                                       |
-| [**TEST_CATALOG.md**](tests/TEST_CATALOG.md)                 | E2e test catalog — 15 categories, 312 assertions, section objectives (for auditors)                                                      |
+| Document                                                | Description                                                                                                                                                                  |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [**ARCHITECTURE.md**](DESIGN/mcp-vault/ARCHITECTURE.md) | Full specification — vision, 6-layer ASGI architecture, vaults, SSH CA, MCP policies (6 ready-to-use examples), unseal key security (3 factors), HSM roadmap                  |
+| [**TECHNICAL.md**](DESIGN/mcp-vault/TECHNICAL.md)       | Technical documentation — source modules (incl. PKI v0.5.1), 6-layer ASGI stack, Docker, tests, dependencies, roadmap                                                         |
+| [**SECURITY_AUDIT.md**](DESIGN/mcp-vault/SECURITY_AUDIT.md) | Consolidated security audit report — 60 V2.1 findings, 28 fixed, 13 residual documented                                                                                   |
+| [**scripts/README.md**](scripts/README.md)              | Full CLI guide — 7 command groups, interactive shell, examples                                                                                                               |
+| [**tests/README.md**](tests/README.md)                  | Test execution guide — 4 levels, ~600 tests, commands for auditors                                                                                                           |
+| [**TEST_CATALOG.md**](tests/TEST_CATALOG.md)            | e2e test catalog — 15 categories, 312 assertions, purpose of each section (for auditors)                                                                                     |
 
 ---
 
-## ⚡ Quick Start
+## ⚡ Quick start
 
 ```bash
 # 1. Clone and configure
 cp .env.example .env
-# Edit S3 credentials in .env
+# Adjust S3 credentials in .env
 
 # 2. Build and start
 docker compose build
 docker compose up -d
 
-# 3. Verify (from container)
+# 3. Check (from the container)
 docker compose exec mcp-vault python scripts/mcp_cli.py health
 
 # 4. Test (312 e2e tests)
 docker compose exec mcp-vault python tests/test_e2e.py
 ```
 
-### Automatic Lifecycle
+### Automatic lifecycle
 
 On startup, MCP Vault:
 1. Loads tokens from S3
 2. Restores OpenBao data (Docker volume or S3)
-3. Starts OpenBao, initializes (first time) and unseals it
-4. **Unseal keys**: encrypted (AES-256-GCM) on S3, never in cleartext on disk — memory only
-5. Starts periodic S3 sync (60s)
+3. Starts OpenBao, initializes it (first time) and unseals it
+4. **Unseal keys**: encrypted (AES-256-GCM) on S3, never in cleartext on disk — only in memory
+5. Enables periodic S3 sync (60s)
 
 On shutdown (`docker compose stop`):
 1. Seals OpenBao 🔒
@@ -63,77 +63,109 @@ On shutdown (`docker compose stop`):
 
 ---
 
-## 🛠️ MCP Tools (24)
+## 🛠️ MCP tools (35)
 
 ### System (2)
 
-| Tool            | Description                                  |
-| --------------- | -------------------------------------------- |
-| `system_health` | Health status (OpenBao + S3)                 |
-| `system_about`  | Service info (version, tools, platform)      |
+| Tool            | Description                                       |
+| --------------- | ------------------------------------------------- |
+| `system_health` | Health status (OpenBao + S3)                      |
+| `system_about`  | Service info (version, tools, platform)           |
 
-> 💡 **Introspection**: the `/admin/api/whoami` endpoint and `whoami` CLI command let you verify the current token's identity and permissions.
+> 💡 **Introspection**: the `/admin/api/whoami` endpoint and the `whoami` CLI command let you check the identity and permissions of the current token.
 
-### Vaults — Secret Stores (5)
+### Vaults — secret stores (5)
 
-| Tool                                   | Perm  | Description                                          |
-| -------------------------------------- | ----- | ---------------------------------------------------- |
+| Tool                                   | Perm  | Description                                            |
+| -------------------------------------- | ----- | ------------------------------------------------------ |
 | `vault_create(vault_id, description?)` | write | Creates a vault (KV v2 mount) + metadata (owner, date) |
-| `vault_list()`                         | read  | Lists accessible vaults (filtered by token)          |
-| `vault_info(vault_id)`                 | read  | Vault details (metadata, secrets_count, owner)       |
-| `vault_update(vault_id, description)`  | write | Updates a vault's description                        |
-| `vault_delete(vault_id, confirm)`      | admin | Deletes a vault and all its secrets ⚠️             |
+| `vault_list()`                         | read  | Lists accessible vaults (filtered by token)            |
+| `vault_info(vault_id)`                 | read  | Vault details (metadata, secrets_count, owner)         |
+| `vault_update(vault_id, description)`  | write | Updates a vault's description                           |
+| `vault_delete(vault_id, confirm)`      | admin | Deletes a vault and all its secrets ⚠️                |
 
 ### Secrets (6)
 
-| Tool                                        | Perm  | Description                                       |
-| ------------------------------------------- | ----- | ------------------------------------------------- |
-| `secret_write(vault_id, path, data, type?)` | write | Writes a typed secret                             |
-| `secret_read(vault_id, path, version?)`     | read  | Reads a secret (latest or specific version)       |
-| `secret_list(vault_id, path?)`              | read  | Lists keys in a vault                             |
-| `secret_delete(vault_id, path)`             | write | Deletes a secret and all its versions             |
-| `secret_types()`                            | read  | Lists the 14 secret types                        |
-| `secret_generate_password(length?, ...)`    | read  | Generates a CSPRNG password                       |
+| Tool                                        | Perm  | Description                                   |
+| ------------------------------------------- | ----- | --------------------------------------------- |
+| `secret_write(vault_id, path, data, type?)` | write | Writes a typed secret                         |
+| `secret_read(vault_id, path, version?)`     | read  | Reads a secret (latest version or specific)   |
+| `secret_list(vault_id, path?)`              | read  | Lists a vault's keys                          |
+| `secret_delete(vault_id, path)`             | write | Deletes a secret and all its versions         |
+| `secret_types()`                            | read  | Lists the 14 secret types                     |
+| `secret_generate_password(length?, ...)`    | read  | Generates a CSPRNG password                   |
 
 ### SSH Certificate Authority (5)
 
-Each vault has its **own isolated SSH CA** — CAs are cryptographically different between vaults. A certificate signed by one vault's CA does NOT work on servers configured for another vault.
+Each vault has its **own isolated SSH CA** — CAs are cryptographically distinct between vaults. A certificate signed by one vault's CA does NOT work on servers configured for another vault.
 
-| Tool                                                 | Perm  | Description                                                  |
-| ---------------------------------------------------- | ----- | ------------------------------------------------------------ |
-| `ssh_ca_setup(vault_id, role, allowed_users?, ttl?)` | write | Configures an SSH CA + role in a vault                       |
-| `ssh_sign_key(vault_id, role, public_key, ttl?)`     | read  | Signs a public key → ephemeral certificate                   |
-| `ssh_ca_public_key(vault_id)`                        | read  | CA public key (for `TrustedUserCAKeys` on servers)           |
-| `ssh_ca_list_roles(vault_id)`                        | read  | Lists SSH CA roles configured in a vault                     |
-| `ssh_ca_role_info(vault_id, role)`                   | read  | Role details (TTL, allowed_users, extensions)                |
+| Tool                                                 | Perm  | Description                                                |
+| ---------------------------------------------------- | ----- | ---------------------------------------------------------- |
+| `ssh_ca_setup(vault_id, role, allowed_users?, ttl?)` | write | Configures an SSH CA + role in a vault                     |
+| `ssh_sign_key(vault_id, role, public_key, ttl?)`     | read  | Signs a public key → ephemeral certificate                 |
+| `ssh_ca_public_key(vault_id)`                        | read  | CA public key (for `TrustedUserCAKeys` on servers)        |
+| `ssh_ca_list_roles(vault_id)`                        | read  | Lists SSH CA roles configured in a vault                  |
+| `ssh_ca_role_info(vault_id, role)`                   | read  | Role details (TTL, allowed_users, extensions)             |
 
-### MCP Policies — Granular Access Control (4)
+### MCP Policies — granular access control (4)
 
-Policies allow fine-grained restriction of tools accessible per token, with **wildcard** support (`system_*`, `ssh_*`...) and **per-vault rules** (`prod-*` → read-only).
+Policies restrict the tools accessible per token, with support for **wildcards** (`system_*`, `ssh_*`...) and **per-vault rules** (`prod-*` → read-only).
 
-| Tool                                                                                 | Perm  | Description                                          |
-| ------------------------------------------------------------------------------------ | ----- | ---------------------------------------------------- |
-| `policy_create(policy_id, description?, allowed_tools?, denied_tools?, path_rules?)` | admin | Creates a policy with access rules                   |
-| `policy_list()`                                                                      | admin | Lists policies with counters                         |
-| `policy_get(policy_id)`                                                              | admin | Full details (allowed/denied tools, path_rules)      |
+| Tool                                                                                 | Perm  | Description                                         |
+| ------------------------------------------------------------------------------------ | ----- | --------------------------------------------------- |
+| `policy_create(policy_id, description?, allowed_tools?, denied_tools?, path_rules?)` | admin | Creates a policy with access rules                  |
+| `policy_list()`                                                                      | admin | Lists policies with counters                        |
+| `policy_get(policy_id)`                                                              | admin | Full details (allowed/denied tools, path_rules)     |
 | `policy_delete(policy_id, confirm)`                                                  | admin | Deletes a policy ⚠️                                |
 
 > 📋 6 ready-to-use policies documented in [ARCHITECTURE.md §6.4.1](DESIGN/mcp-vault/ARCHITECTURE.md): `readonly`, `ssh-operator`, `developer`, `prod-reader-dev-writer`, `ci-cd-agent`, `security-auditor`
 
 ### Token Management (1)
 
-| Tool                                                           | Perm  | Description                                                |
-| -------------------------------------------------------------- | ----- | ---------------------------------------------------------- |
-| `token_update(hash_prefix, policy_id?, permissions?, vaults?)` | admin | Modify an existing token (policy, permissions, vaults)     |
+| Tool                                                           | Perm  | Description                                             |
+| -------------------------------------------------------------- | ----- | ------------------------------------------------------- |
+| `token_update(hash_prefix, policy_id?, permissions?, vaults?)` | admin | Modifies an existing token (policy, permissions, vaults) |
+
+### Internal PKI — CA + ACME (7) *(v0.5.0)*
+
+Sovereign CA for the ecosystem: Caddy WAFs enroll via ACME exactly like with Let's Encrypt, but on an internal CA isolated from the public network. Usable in lab (`*.lesur.lan`) and in air-gapped production.
+
+| Tool | Perm | Description |
+| --- | --- | --- |
+| `pki_ca_setup(lab_mode, allowed_domains, leaf_ttl)` | admin | Initializes root + intermediate CA + ACME role |
+| `pki_ca_public_key()` | read | Root CA PEM, SHA-256 fingerprint, stable URL |
+| `pki_ca_list_roles()` | read | Lists issuance roles |
+| `pki_ca_role_info(role_name)` | read | Role details (domains, TTL, TLS flags) |
+| `pki_list_certs(limit?, offset?)` | admin | Paginated inventory of issued certificates |
+| `pki_revoke_cert(serial_number)` | admin | Revocation + CRL update |
+| `pki_ca_rotate_intermediate(keep_old_issuer?, overlap_ttl?)` | admin | Intermediate CA rotation without downtime |
+
+> Public endpoints (no-auth, standard ACME/PKI): `/acme/directory`, `/pki/ca/root.pem`, `/pki/ca/chain.pem`, `/pki/ca/crl.pem`
+>
+> **`PKI_BASE_URL`** (optional): base URL for CDPs and the OpenBao ACME cluster path. Empty = derived from `MCP_ALLOWED_HOSTS`. Docker test override: `http://mcp-vault:8030`. Must be `http(s)://`.
+
+### JIT Wrap Broker + mediated consumption — C18 (4) *(v0.4.13 / v0.6.x)*
+
+Contract for the mcp-mission `CredentialBrokerService`: single-use credential delivery via OpenBao response wrapping (cubbyhole), with a write-ahead registry on S3 for orphan compensation, and anti-confused-deputy validation (C18).
+
+| Tool | Perm | Description |
+| --- | --- | --- |
+| `secret_wrap(vault_id, secret_path, mission_id, operation_id, ttl_seconds?, tenant_id?, expected_aud?)` | admin | Creates a single-use wrap token (write-ahead registry) |
+| `secret_revoke_wrap(lease_id)` | admin | Idempotent revocation of a wrap token (not found = success) |
+| `secret_wrap_lookup(operation_id)` | admin | Finds & revokes wraps by operation_id (orphan compensation #74) |
+| `secret_consume(wrap_token, operation_id, mission_token)` | admin | Validates ES256/JWKS JWT, checks full binding (mission_id, tenant_id, aud), unwraps OpenBao (C18) |
+
+> Enable C18 validation with `ENFORCE_MISSION_TOKEN_VALIDATION=true`. Default (false): log warning, continue — zero impact in standalone mode without mcp-mission.
+> `tenant_id` and `expected_aud` in `secret_wrap` feed the full C18 binding on the `secret_consume` side *(v0.6.1)*.
 
 ### Audit (1)
 
 | Tool                                                                       | Perm  | Description                                                              |
-| -------------------------------------------------------------------------- | ----- | ------------------------------------------------------------------------ |
-| `audit_log(limit?, client?, vault_id?, tool?, category?, status?, since?)` | admin | Filterable audit log (5000-entry ring buffer + persistent JSONL)         |
+| -------------------------------------------------------------------------- | ----- | ----------------------------------------------------------------------- |
+| `audit_log(limit?, client?, vault_id?, tool?, category?, status?, since?)` | admin | Filterable audit log (5000-entry ring buffer + persistent JSONL)        |
 
 <details>
-<summary>💡 Typical SSH CA Workflow (e.g., LLMaaS infrastructure)</summary>
+<summary>💡 Typical SSH CA workflow (e.g. LLMaaS infrastructure)</summary>
 
 ```python
 # 1. Initial setup (ONE-TIME) — create vault + SSH roles
@@ -141,46 +173,46 @@ vault_create("llmaas-infra", description="SSH CA LLMaaS")
 ssh_ca_setup("llmaas-infra", "adminct", allowed_users="adminct", ttl="1h")
 ssh_ca_setup("llmaas-infra", "agentic", allowed_users="agentic,iaagentic", ttl="30m")
 
-# 2. Deploy CA to servers (ONE-TIME)
+# 2. Deploy the CA on servers (ONE-TIME)
 result = ssh_ca_public_key("llmaas-infra")
 # → Put result["public_key"] in /etc/ssh/trusted-user-ca-keys.pem
 
 # 3. Daily usage — sign a public key
 cert = ssh_sign_key("llmaas-infra", "adminct", public_key="ssh-ed25519 AAAA...", ttl="1h")
-# → cert["signed_key"] = signed certificate, valid for 1h
-# → OpenSSH uses it automatically when placed alongside the private key
+# → cert["signed_key"] = signed certificate, valid 1h
+# → OpenSSH uses it automatically when placed next to the private key
 ```
 
 </details>
 
 ---
 
-## 🔑 Secret Types (1Password-style)
+## 🔑 Secret types (1Password-style)
 
-| Type            | Icon  | Required Fields          | Usage              |
-| --------------- | ----- | ------------------------ | ------------------ |
-| `login`         | 🔑   | username, password       | Web/app credentials |
-| `password`      | 🔒   | password                 | Simple password    |
-| `secure_note`   | 📝   | content                  | Secure notes       |
-| `api_key`       | 🔌   | key                      | API keys           |
-| `ssh_key`       | 🗝️ | private_key              | SSH key pairs      |
-| `database`      | 🗄️ | host, username, password | DB connections     |
-| `server`        | 🖥️ | host, username           | Server access      |
-| `certificate`   | 📜   | certificate, private_key | TLS/SSL certs      |
-| `env_file`      | 📄   | content                  | .env files         |
-| `credit_card`   | 💳   | number, expiry, cvv      | Credit cards       |
-| `identity`      | 👤   | name                     | Identities         |
-| `wifi`          | 📶   | ssid, password           | Wi-Fi networks     |
-| `crypto_wallet` | ₿     | *(all optional)*         | Crypto wallets     |
-| `custom`        | ⚙️  | *(free-form fields)*     | Everything else    |
+| Type            | Icon  | Required fields          | Usage                |
+| --------------- | ----- | ------------------------ | -------------------- |
+| `login`         | 🔑   | username, password       | Web/app credentials  |
+| `password`      | 🔒   | password                 | Simple password      |
+| `secure_note`   | 📝   | content                  | Secure notes         |
+| `api_key`       | 🔌   | key                      | API keys             |
+| `ssh_key`       | 🗝️ | private_key              | SSH key pairs        |
+| `database`      | 🗄️ | host, username, password | DB connections       |
+| `server`        | 🖥️ | host, username           | Server access        |
+| `certificate`   | 📜   | certificate, private_key | TLS/SSL certificates |
+| `env_file`      | 📄   | content                  | .env files           |
+| `credit_card`   | 💳   | number, expiry, cvv      | Bank cards           |
+| `identity`      | 👤   | name                     | Identities           |
+| `wifi`          | 📶   | ssid, password           | Wi-Fi networks       |
+| `crypto_wallet` | ₿     | *(all optional)*         | Crypto wallets       |
+| `custom`        | ⚙️  | *(free fields)*          | Everything else      |
 
-Every secret supports: `tags`, `favorite`, automatic KV v2 versioning.
+Each secret supports: `tags`, `favorite`, automatic KV v2 versioning.
 
 ---
 
 ## 🔒 Authentication
 
-> ⚠️ **Only the `Authorization: Bearer <token>` header is accepted.** Query string authentication (`?token=`) was removed for security reasons (v0.3.1).
+> ⚠️ **Only the `Authorization: Bearer <token>` header is accepted.** Query-string authentication (`?token=`) was removed for security reasons (v0.3.1).
 
 ```
 Authorization: Bearer <token>
@@ -195,13 +227,13 @@ Authorization: Bearer <token>
 **3 isolation layers**:
 1. **Vault-level**: `allowed_resources=[]` → owner-based (only vaults created by the token), or explicit list
 2. **Tool-level**: policies with `allowed_tools`/`denied_tools` (fnmatch wildcards)
-3. **Path-level**: `allowed_paths` in `path_rules` → per-secret access control
+3. **Path-level**: `allowed_paths` in `path_rules` → control per individual secret
 
 ---
 
 ## 🖥️ CLI
 
-MCP Vault includes a complete CLI with Click + Rich + interactive shell:
+MCP Vault includes a full CLI with Click + Rich + interactive shell:
 
 ```bash
 # Scriptable commands
@@ -209,7 +241,7 @@ python scripts/mcp_cli.py health
 python scripts/mcp_cli.py about
 python scripts/mcp_cli.py whoami                       # Current token identity
 python scripts/mcp_cli.py vault list
-python scripts/mcp_cli.py vault create prod-servers -d "SSH keys prod"
+python scripts/mcp_cli.py vault create prod-servers -d "Prod SSH keys"
 python scripts/mcp_cli.py secret write prod-servers web/github -d '{"username":"me","password":"s3cr3t"}' -t login
 python scripts/mcp_cli.py secret read prod-servers web/github
 python scripts/mcp_cli.py secret password -l 32
@@ -219,13 +251,43 @@ python scripts/mcp_cli.py policy create no-ssh -d "No SSH" --denied "ssh_*"
 python scripts/mcp_cli.py policy create team-x --allowed "secret_*" --path-rules '[{"vault_pattern":"shared-*","allowed_paths":["shared/*"]}]'
 python scripts/mcp_cli.py audit --status denied --limit 10
 
+# Internal PKI (v0.5.0)
+python scripts/mcp_cli.py pki setup --lab --domains '*.lesur.lan,lesur.lan'
+python scripts/mcp_cli.py pki ca-key
+python scripts/mcp_cli.py pki certs
+python scripts/mcp_cli.py pki revoke 12:34:ab:cd:ef:12:34:56
+
 # Interactive shell
 python scripts/mcp_cli.py shell
 ```
 
-> Each command's `--help` explains the 3-layer security model and guides the user.
+> The `--help` of each command explains the 3-layer security model and guides the user.
 
-See [scripts/README.md](scripts/README.md) for the complete CLI documentation.
+See [scripts/README.md](scripts/README.md) for the full CLI documentation.
+
+---
+
+## ⚙️ Environment variables
+
+Copy `.env.example` → `.env` and adjust. Variables are grouped by domain:
+
+| Group | Variables | Required |
+|--------|-----------|----------|
+| **Server** | `MCP_SERVER_NAME`, `MCP_SERVER_PORT`, `MCP_ALLOWED_HOSTS` | Yes |
+| **Auth** | `ADMIN_BOOTSTRAP_KEY` | Yes |
+| **S3** | `S3_ENDPOINT_URL`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET_NAME`, `S3_REGION_NAME` | Yes |
+| **OpenBao** | `OPENBAO_ADDR`, `OPENBAO_SHARES`, `OPENBAO_THRESHOLD` | Yes |
+| **Storage sync** | `VAULT_S3_PREFIX`, `VAULT_S3_SYNC_INTERVAL` | No |
+| **PKI** *(v0.5.x)* | `PKI_BASE_URL` | No — overrides ACME URL in Docker tests |
+| **Mission JWT** *(v0.6.x)* | `ENFORCE_MISSION_TOKEN_VALIDATION`, `MISSION_JWKS_URL`, `MISSION_TOKEN_AUD`, `MISSION_JWKS_CACHE_TTL`, `MISSION_STATUS_URL` | No — standalone without mcp-mission |
+| **CLI tokens** | `VAULT_WRAP_TOKEN`, `VAULT_MISSION_TOKEN` | No — export before the command, never in `.env` |
+
+> **Sensitive CLI tokens**: `VAULT_WRAP_TOKEN` and `VAULT_MISSION_TOKEN` must NOT be stored in `.env` — they change on every operation. Pass them via `export` or inline:
+> ```bash
+> VAULT_WRAP_TOKEN=hvs.CAES... mcp-vault secret consume op-123
+> ```
+
+See `.env.example` for the full documentation of each variable.
 
 ---
 
@@ -236,7 +298,7 @@ See [scripts/README.md](scripts/README.md) for the complete CLI documentation.
 ```
 Internet → WAF (Caddy + Coraza :8085) → MCP Vault (Python :8030) → OpenBao (:8200 localhost)
                   ↕ OWASP CRS v4                  ↕
-              L7 Protection                 S3 Dell ECS (persistence)
+              L7 protection                S3 Dell ECS (persistence)
 ```
 
 ### WAF — Caddy + Coraza (OWASP CRS v4)
@@ -247,40 +309,42 @@ The WAF protects the API against L7 attacks (SQL injection, XSS, LFI, RCE, SSRF)
 - **Blocking mode on ALL endpoints** (health, `/mcp`, `/admin/api`)
 - **2 targeted exclusions** for JSON-RPC false positives: French Unicode (920540), PowerShell names (932120)
 - **Security headers**: CSP, X-Frame-Options DENY, X-XSS-Protection, nosniff
-- MCP-compatible allowed methods: GET, POST, DELETE, PUT, PATCH
+- Methods allowed per the MCP protocol: GET, POST, DELETE, PUT, PATCH
 
-### ASGI Stack (5 layers)
+### ASGI stack (6 layers)
 ```
-AdminMiddleware → HealthCheckMiddleware → AuthMiddleware → LoggingMiddleware → FastMCP
+PkiMiddleware → AdminMiddleware → HealthCheckMiddleware → AuthMiddleware → LoggingMiddleware → FastMCP
 ```
 
-### OpenBao Lifecycle
+`PkiMiddleware` (v0.5.0) is the outermost layer — it intercepts `/acme/*` and `/pki/ca/*.pem` before auth (public endpoints by PKI/ACME design).
+
+### OpenBao lifecycle
 ```
 STARTUP:  S3 download → bao server → init/unseal → periodic sync
 RUNTIME:  secrets via hvac → S3 sync every 60s
 SHUTDOWN: seal → final S3 upload → stop process
-CRASH:    Local Docker volume → immediate restart
+CRASH:    local Docker volume → immediate restart
 ```
 
-### Unseal Key Security
+### Unseal key security
 
 OpenBao's unseal keys are protected by **3-factor physical separation**:
 
-| Factor                                  | Storage                   | Compromise alone = insufficient    |
-| --------------------------------------- | ------------------------- | ---------------------------------- |
-| **Encrypted data** (OpenBao barrier)    | Docker volume + S3        | Unreadable without unseal key      |
-| **Unseal keys** (AES-256-GCM encrypted) | S3 only                   | Undecryptable without bootstrap key |
-| **ADMIN_BOOTSTRAP_KEY**                 | Environment variable only | Useless without encrypted keys     |
+| Factor                                   | Storage                  | Compromise alone = insufficient    |
+| ---------------------------------------- | ------------------------ | ---------------------------------- |
+| **Encrypted data** (OpenBao barrier)     | Docker volume + S3       | Unreadable without unseal key      |
+| **Unseal keys** (AES-256-GCM encrypted)  | S3 only                  | Undecryptable without bootstrap key |
+| **ADMIN_BOOTSTRAP_KEY**                  | Env variable only        | Useless without the encrypted keys |
 
-**Invariants**: unseal keys are **never** in cleartext on disk — memory-only during runtime. A crash automatically wipes the keys.
+**Invariants**: unseal keys are **never** in cleartext on disk — only in memory during runtime. A crash automatically wipes the keys.
 
-**Security Roadmap**:
+**Security roadmap**:
 
-| Version              | Approach                                                                                                    |
-| -------------------- | ----------------------------------------------------------------------------------------------------------- |
-| **v0.4.16** (current) | Keys on S3 encrypted AES-256-GCM+AAD, memory-only at runtime — 60 findings audited (28 fixed, 13 residual documented) |
-| **v1.0**             | Transit Auto-Unseal via dedicated OpenBao (Cloud Temple KMS)                                                |
-| **v2.0**             | **HSM connection** (Hardware Security Module) Cloud Temple — keys never leave the certified hardware module  |
+| Version              | Approach                                                                                                            |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **v0.6.1** (current) | Keys on S3 encrypted AES-256-GCM+AAD, memory-only at runtime — C18 hardening: singleton JWT + full tenant_id/aud binding |
+| **v1.0**             | Transit Auto-Unseal via dedicated OpenBao (Cloud Temple KMS)                                                        |
+| **v2.0**             | **HSM connection** (Hardware Security Module) Cloud Temple — keys never leave the certified hardware module        |
 
 > 📖 See [DESIGN/mcp-vault/ARCHITECTURE.md](DESIGN/mcp-vault/ARCHITECTURE.md) §8 and §11 for full details.
 
@@ -288,51 +352,51 @@ OpenBao's unseal keys are protected by **3-factor physical separation**:
 
 ## 📋 Tests (~600 tests, zero mocking)
 
-> 📖 See [tests/README.md](tests/README.md) for the complete execution guide.
+> 📖 See [tests/README.md](tests/README.md) for the full execution guide.
 
 ```bash
-# 1. CLI tests — parsing + display (197 tests, NO server)
+# 1. CLI tests — parsing + display (197 tests, WITHOUT server)
 python tests/test_cli_all.py
 
 # 2. CLI LIVE tests — full cycle (79 tests, real server)
 MCP_URL=http://localhost:8085 MCP_TOKEN=<key> python tests/test_cli_live.py
 
-# 3. E2e MCP tests (312 tests, in Docker)
+# 3. MCP e2e tests (312 tests, in Docker)
 docker compose exec mcp-vault python tests/test_e2e.py
 
-# 4. Crypto tests (18 tests, NO server — AES-256-GCM + AAD + entropy validation)
+# 4. Crypto tests (18 tests, WITHOUT server — AES-256-GCM + AAD + entropy validation)
 python tests/test_crypto.py
 
-# Single CLI group
+# A single CLI group
 python tests/test_cli_all.py --only policy
 
-# Single e2e group
+# A single e2e group
 docker compose exec mcp-vault python tests/test_e2e.py --test enforcement
 ```
 
-### E2e Coverage (312 tests, 15 categories)
+### e2e coverage (312 tests, 15 categories)
 
-| Category               | Tests  | Description                                                                       |
-| ---------------------- | ------ | --------------------------------------------------------------------------------- |
-| System                 | 7      | health, about, services, tools_count (24)                                         |
-| Vault CRUD             | 28     | create + metadata, list, info + owner, update, delete, confirm, errors            |
-| Secrets CRUD           | 24     | 10 types written, read/list/delete, validation                                    |
-| Versioning             | 8      | v1→v2→v3, read latest, read specific                                              |
-| Passwords              | 14     | lengths, options, exclusions, CSPRNG                                              |
-| Isolation              | 7      | secrets isolated between vaults                                                   |
-| Errors                 | 10     | edge cases, non-existent vault, invalid type, `_vault_meta` protection            |
-| S3 Sync                | 3      | tar.gz archive on S3                                                              |
-| SSH CA                 | 33     | setup, multiple roles, ed25519 signing, list/info roles, CA isolation, cleanup    |
-| Types                  | 14     | 14 types verified individually                                                    |
-| Admin API              | 15     | health, whoami, generate-password, logs, CSPRNG uniqueness                        |
-| Policies MCP           | 43     | CRUD, validation, wildcards, path_rules, duplicates, errors, Admin API REST       |
-| **Policy Enforcement** | **37** | check_policy, token_update, denied/allowed, policy change, Admin API              |
+| Category               | Tests  | Description                                                                        |
+| ---------------------- | ------ | ---------------------------------------------------------------------------------- |
+| System                 | 7      | health, about, services, tools_count (35)                                          |
+| Vault CRUD             | 28     | create + metadata, list, info + owner, update, delete, confirm, errors             |
+| Secrets CRUD           | 24     | 10 types written, read/list/delete, validation                                     |
+| Versioning             | 8      | v1→v2→v3, read latest, read specific                                               |
+| Passwords              | 14     | lengths, options, exclusions, CSPRNG                                               |
+| Isolation              | 7      | secrets partitioned between vaults                                                 |
+| Errors                 | 10     | edge cases, missing vault, invalid type, `_vault_meta` protection                  |
+| S3 Sync                | 3      | tar.gz archive on S3                                                               |
+| SSH CA                 | 33     | setup, multiple roles, ed25519 signing, list/info roles, CA isolation, cleanup     |
+| Types                  | 14     | 14 types verified individually                                                     |
+| Admin API              | 15     | health, whoami, generate-password, logs, CSPRNG uniqueness                         |
+| MCP Policies           | 43     | CRUD, validation, wildcards, path_rules, duplicates, errors, Admin API REST        |
+| **Policy Enforcement** | **37** | check_policy, token_update, denied/allowed, policy change, Admin API               |
 | **Audit Log**          | **31** | audit_log MCP, filters (category/tool/status/since/limit), stats, Admin API /audit |
-| **WAF Security**       | **17** | LFI, SQLi, XSS, RCE, Scanner Detection → 403 + legitimate request non-regression |
+| **WAF Security**       | **17** | LFI, SQLi, XSS, RCE, Scanner Detection → 403 + legitimate-request non-regression  |
 
 ---
 
-## 📁 Project Structure
+## 📁 Project structure
 
 ```
 mcp-vault/
@@ -341,10 +405,10 @@ mcp-vault/
 ├── Dockerfile                # Multi-stage (OpenBao 2.5.1 + Python 3.12)
 ├── requirements.txt          # Python dependencies
 ├── requirements.lock         # Pinned dependencies (exact versions)
-├── VERSION                   # 0.4.16
+├── VERSION                   # 0.6.1
 ├── DESIGN/mcp-vault/
-│   ├── ARCHITECTURE.md       # Detailed specification (v0.2.2-draft)
-│   ├── TECHNICAL.md          # Technical documentation (v0.4.16)
+│   ├── ARCHITECTURE.md       # Detailed specification (v0.6.1)
+│   ├── TECHNICAL.md          # Technical documentation (v0.6.1)
 │   └── SECURITY_AUDIT.md     # Consolidated audit report (60 V2.1 findings)
 ├── scripts/
 │   ├── mcp_cli.py            # CLI entry point
@@ -357,28 +421,30 @@ mcp-vault/
 │       └── shell.py          # Interactive shell
 ├── src/mcp_vault/
 │   ├── config.py             # pydantic-settings configuration
-│   ├── server.py             # FastMCP + 24 MCP tools + lifecycle + audit
-│   ├── lifecycle.py          # Startup/shutdown orchestrator
-│   ├── s3_client.py          # Hybrid S3 client SigV2/SigV4
+│   ├── server.py             # FastMCP + 32 MCP tools + lifecycle + audit
+│   ├── lifecycle.py          # startup/shutdown orchestrator
+│   ├── s3_client.py          # Hybrid SigV2/SigV4 S3 client
 │   ├── s3_sync.py            # File backend ↔ S3 sync
-│   ├── auth/                 # Bearer tokens, check_access, ContextVar
+│   ├── auth/                 # Bearer tokens, check_access, ContextVar, jwt_validator
 │   ├── admin/                # Web console /admin + REST API
 │   ├── openbao/              # Process manager, HCL config, lifecycle
-│   ├── vault/                # Spaces, secrets, SSH CA, types
+│   ├── vault/                # Spaces, secrets, SSH CA, PKI CA, wrapping, types
 │   └── static/               # Admin SPA console (100% CLI parity)
 │       ├── admin.html        # HTML structure + 7 modals
 │       ├── css/admin.css     # Cloud Temple design (dark theme)
-│       ├── js/               # 8 JS modules (config, api, app, dashboard, vaults, tokens, policies, activity)
+│       ├── js/               # 9 JS modules (config, api, app, dashboard, vaults, tokens, policies, activity, pki)
 │       └── img/              # logo-cloudtemple.svg
 ├── tests/
 │   ├── README.md             # Test execution guide (auditors)
 │   ├── TEST_CATALOG.md       # Test catalog for auditors
 │   ├── test_cli_all.py       # 197 CLI parsing tests (no server)
-│   ├── test_cli_live.py      # 79 live CLI tests (real server)
+│   ├── test_cli_live.py      # 79 CLI live tests (real server)
 │   ├── test_e2e.py           # 312 MCP e2e tests (15 categories)
 │   ├── test_crypto.py        # 18 AES-256-GCM + AAD tests
-│   ├── test_service.py       # 78 low-level tests
-│   ├── test_integration.py   # Pytest tests
+│   ├── test_jwt_validator.py # C18 JWT validator tests (mission_token)
+│   ├── test_wrap.py          # JIT wrap broker + C18 binding tests
+│   ├── test_service.py       # low-level tests
+│   ├── test_integration.py   # pytest tests
 │   └── cli/                  # CLI tests split by group (7 files)
 └── waf/                      # WAF Caddy + Coraza (OWASP CRS v4)
     ├── Dockerfile            # Multi-stage (xcaddy + CRS v4.7.0)
@@ -388,17 +454,17 @@ mcp-vault/
 
 ---
 
-## 🌐 Cloud Temple MCP Ecosystem
+## 🌐 Cloud Temple MCP ecosystem
 
 | Server           | Role                              | Port  |
 | ---------------- | --------------------------------- | ----- |
-| **MCP Tools**    | Toolkit (SSH, HTTP, shell)        | :8010 |
+| **MCP Tools**    | Toolbox (SSH, HTTP, shell)        | :8010 |
 | **Live Memory**  | Shared working memory             | :8002 |
-| **Graph Memory** | Long-term memory (knowledge graph) | :8080 |
-| **MCP Vault**    | 🔐 Secrets vault                 | :8030 |
+| **Graph Memory** | Long-term memory (graph)          | :8080 |
+| **MCP Vault**    | 🔐 Secret vault                  | :8030 |
 | **MCP Agent**    | Autonomous agent runtime          | :8040 |
 | **MCP Mission**  | Mission orchestrator              | :8020 |
 
 ---
 
-**License**: Apache 2.0 | **Author**: Cloud Temple | **Version**: 0.4.16
+**License**: Apache 2.0 | **Author**: Cloud Temple | **Version**: 0.6.1
