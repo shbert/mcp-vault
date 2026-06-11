@@ -6,7 +6,11 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     networks:
-      - mcp-net
+      mcp-net:
+        # Le serveur ACME (OpenBao) doit joindre ce conteneur pour le
+        # challenge HTTP-01 sur le nom demandé (test E2E #41).
+        aliases:
+          - test.lesur.lan
     ports:
       - "8444:443"
     # Permet à OpenBao (dans mcp-vault) de joindre caddy-test sur port 80 via HTTP-01

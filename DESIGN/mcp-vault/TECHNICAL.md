@@ -1,6 +1,6 @@
 # Documentation Technique — MCP Vault
 
-> **Version** : 0.6.7 | **Date** : 2026-06-11 | **Auteur** : Cloud Temple
+> **Version** : 0.6.8 | **Date** : 2026-06-11 | **Auteur** : Cloud Temple
 > **Licence** : Apache 2.0 | **Statut** : ✅ Production-ready (audit V2.1 complété + PKI interne v0.5.1)
 
 ---
@@ -335,15 +335,15 @@ CA interne souveraine basée sur l'engine PKI d'OpenBao. CA globale (non par vau
 - `/v1/_sys_pki_int/acme/*` → idem (URL longue générée par OpenBao dans les réponses ACME directory)
 - `/pki/ca/*.pem` → endpoints CA/CRL OpenBao (lecture publique)
 
-Non-authentifié par design (RFC 8555 ACME + JWS). Anti-traversal sur acme_suffix et query_string. WAF Coraza : exclusions ciblées par regex sur les 3 paths PEM et endpoints ACME normalisés RFC 8555. **Ces exclusions `ctl:ruleRemoveById` sont déclarées AVANT l'`Include` du CRS** (pattern « exclusions before CRS ») — sinon les règles CRS en phase:1 (ex. 920440 sur l'extension `.pem`) s'évaluent et scorent avant le `ctl`, qui devient inopérant (issue #42, fix v0.6.7). Validé par test d'intégration à travers le WAF (`tests/pki/` T3d : `.pem` connus → 200, `.pem` arbitraire → 403).
+Non-authentifié par design (RFC 8555 ACME + JWS). Anti-traversal sur acme_suffix et query_string. WAF Coraza : exclusions ciblées par regex sur les 3 paths PEM et endpoints ACME normalisés RFC 8555. **Ces exclusions `ctl:ruleRemoveById` sont déclarées AVANT l'`Include` du CRS** (pattern « exclusions before CRS ») — sinon les règles CRS en phase:1 (ex. 920440 sur l'extension `.pem`) s'évaluent et scorent avant le `ctl`, qui devient inopérant (issue #42, fix v0.6.8). Validé par test d'intégration à travers le WAF (`tests/pki/` T3d : `.pem` connus → 200, `.pem` arbitraire → 403).
 
 **Cluster path** *(v0.5.1)* : requis par OpenBao 2.5.1 avant l'activation ACME. Configuré via `client._adapter.post("/v1/_sys_pki_int/config/cluster", json={"path": base_url + "/v1/_sys_pki_int"})` (collision paramètre `path` dans `hvac.write()`). URL déduite de `PKI_BASE_URL` (override) ou `MCP_ALLOWED_HOSTS`. **HTTPS requis pour la génération de nonces ACME** (OpenBao 2.5.1) — fonctionnel en production avec WAF TLS.
 
 **Admin REST** *(v0.5.1)* : `GET /admin/api/pki/roles` et `GET /admin/api/pki/roles/{role_name}` — info non-secrète (configuration du rôle ACME), accessible à tout token valide pour diagnostic.
 
-### 3.11c `auth/jwt_validator.py` — Validateur JWT mission_token *(v0.6.7)*
+### 3.11c `auth/jwt_validator.py` — Validateur JWT mission_token *(v0.6.8)*
 
-Validation JWT ES256/JWKS pour l'anti-confused-deputy C18 (issue #26). Singleton process-wide depuis v0.6.7 (issue #29).
+Validation JWT ES256/JWKS pour l'anti-confused-deputy C18 (issue #26). Singleton process-wide depuis v0.6.8 (issue #29).
 
 | Classe/Fonction | Description |
 | --- | --- |
@@ -725,7 +725,7 @@ Voir `ARCHITECTURE.md §7.8` pour les détails complets.
 
 | Version             | Mécanisme                                    | Où vivent les clés         | Niveau         |
 | ------------------- | -------------------------------------------- | -------------------------- | -------------- |
-| **v0.6.7** (actuel) | AES-256-GCM+AAD + PBKDF2 + bootstrap key env | Mémoire Python au runtime  | 🟡 Bonne      |
+| **v0.6.8** (actuel) | AES-256-GCM+AAD + PBKDF2 + bootstrap key env | Mémoire Python au runtime  | 🟡 Bonne      |
 | **v1.0**            | Transit Auto-Unseal via OpenBao KMS dédié    | KMS dédié (Shamir 5/3)     | 🟢 Excellente |
 | **v2.0**            | HSM matériel (PKCS#11 / KMIP)                | HSM certifié FIPS 140-2 L3 | 🟢 Maximale   |
 

@@ -19,6 +19,12 @@
 
 {$SITE_ADDRESS::8085} {
 
+	# ── TLS (paramétrable) ─────────────────────────────────────────
+	# Vide par défaut (prod : terminaison TLS en façade / vrai certificat).
+	# En test E2E ACME : WAF_TLS_DIRECTIVE="tls internal" pour servir le
+	# directory ACME en HTTPS (Caddy refuse l'ACME sur une CA en HTTP).
+	{$WAF_TLS_DIRECTIVE:}
+
 	# ── Rate Limiting — Protection brute-force et DoS ─────────────
 	# 10 000 requêtes par 5 minutes par IP (~33 req/s soutenu)
 	# SÉCURITÉ : empêche le brute-force de tokens et le DoS applicatif

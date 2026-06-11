@@ -23,6 +23,7 @@ services:
       - ./waf/Caddyfile:/etc/caddy/Caddyfile:ro
     environment:
       - SITE_ADDRESS=${SITE_ADDRESS:-:8085}
+      - WAF_TLS_DIRECTIVE=${WAF_TLS_DIRECTIVE:-}
     depends_on:
       - mcp-vault
     restart: unless-stopped
