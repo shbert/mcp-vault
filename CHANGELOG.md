@@ -1,5 +1,17 @@
 # Changelog — MCP Vault
 
+## [0.6.5] — 2026-06-11
+
+### UI — panneau PKI /admin lisible (issue #41, partie 1/2)
+
+Le panneau PKI s'affichait cassé : `pki.js` utilisait des classes CSS jamais définies dans `admin.css` (labels collés aux valeurs, pas de grille de cartes).
+
+- `admin.css` : ajout (patch additif ciblé, recommandation Codex) des classes `card-grid`, `card-label/value/value-big/sub`, `section-title`, `url-list/row/label/value`, `btn-copy`, `btn-warn`, `badge-danger`, `mono-tiny/small`, `table-wrapper`, `empty-row`, `page-header`, `error-banner`, `success-banner`, `loading` — cohérentes avec le design system Cloud Temple.
+- Responsive : `.table-wrapper` scroll horizontal, lignes URL empilées + header en colonne sur mobile.
+- Aucune classe existante modifiée (hors spécialisation `.card-grid .card`).
+
+> Partie 2/2 (issue #41) : génération de certificat `pki_issue_cert` (backend + CLI + modale) — PR séparée.
+
 ## [0.6.4] — 2026-06-11
 
 ### Fixes PKI prod — distribution CA/CRL + inventaire vide (issues #37, #38)

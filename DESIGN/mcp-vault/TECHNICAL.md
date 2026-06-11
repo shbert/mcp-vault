@@ -1,6 +1,6 @@
 # Documentation Technique — MCP Vault
 
-> **Version** : 0.6.4 | **Date** : 2026-06-11 | **Auteur** : Cloud Temple
+> **Version** : 0.6.5 | **Date** : 2026-06-11 | **Auteur** : Cloud Temple
 > **Licence** : Apache 2.0 | **Statut** : ✅ Production-ready (audit V2.1 complété + PKI interne v0.5.1)
 
 ---
@@ -341,9 +341,9 @@ Non-authentifié par design (RFC 8555 ACME + JWS). Anti-traversal sur acme_suffi
 
 **Admin REST** *(v0.5.1)* : `GET /admin/api/pki/roles` et `GET /admin/api/pki/roles/{role_name}` — info non-secrète (configuration du rôle ACME), accessible à tout token valide pour diagnostic.
 
-### 3.11c `auth/jwt_validator.py` — Validateur JWT mission_token *(v0.6.4)*
+### 3.11c `auth/jwt_validator.py` — Validateur JWT mission_token *(v0.6.5)*
 
-Validation JWT ES256/JWKS pour l'anti-confused-deputy C18 (issue #26). Singleton process-wide depuis v0.6.4 (issue #29).
+Validation JWT ES256/JWKS pour l'anti-confused-deputy C18 (issue #26). Singleton process-wide depuis v0.6.5 (issue #29).
 
 | Classe/Fonction | Description |
 | --- | --- |
@@ -725,7 +725,7 @@ Voir `ARCHITECTURE.md §7.8` pour les détails complets.
 
 | Version             | Mécanisme                                    | Où vivent les clés         | Niveau         |
 | ------------------- | -------------------------------------------- | -------------------------- | -------------- |
-| **v0.6.4** (actuel) | AES-256-GCM+AAD + PBKDF2 + bootstrap key env | Mémoire Python au runtime  | 🟡 Bonne      |
+| **v0.6.5** (actuel) | AES-256-GCM+AAD + PBKDF2 + bootstrap key env | Mémoire Python au runtime  | 🟡 Bonne      |
 | **v1.0**            | Transit Auto-Unseal via OpenBao KMS dédié    | KMS dédié (Shamir 5/3)     | 🟢 Excellente |
 | **v2.0**            | HSM matériel (PKCS#11 / KMIP)                | HSM certifié FIPS 140-2 L3 | 🟢 Maximale   |
 
