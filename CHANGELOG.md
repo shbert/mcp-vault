@@ -1,5 +1,26 @@
 # Changelog — MCP Vault
 
+## [0.6.7] — 2026-06-11
+
+### Fix WAF — exclusions CRS inopérantes en phase:1 (issue #42, BLOQUANT prod)
+
+Le fix #37 (v0.6.4) était **déployé mais inopérant** : `/pki/ca/*.pem` répondait toujours **403** à travers le WAF.
+
+#### Cause racine
+`ctl:ruleRemoveById` ne retire qu'une règle **pas encore évaluée** dans la transaction. Coraza évalue les règles d'une phase dans l'ordre du fichier. Les exclusions (`10001`-`10007`) étaient placées **après** l'`Include` du CRS ; or 920440 et 920540 sont en **phase:1** → elles s'exécutaient et scoraient **avant** le `ctl` → blocage en phase:2 (949110) sur le score accumulé. Seul 932120 (phase:2) était effectivement neutralisé.
+
+#### Fix
+`waf/coraza.conf` : bloc d'exclusions déplacé **AVANT l'`Include` du CRS** (pattern CRS standard « exclusions before CRS »). Les `ctl:ruleRemoveById` en phase:1 retirent alors les règles ciblées avant leur évaluation — phase:1 comprise. Régularise aussi 920540 (v0.5.1, inopérante depuis l'origine).
+
+#### Validation — test d'intégration réel à travers le WAF (non négociable)
+Rebuild WAF + `curl http://localhost:8085` :
+- `/pki/ca/root.pem` · `/chain.pem` · `/crl.pem` → **200** (PEM valide)
+- `/pki/ca/evil.pem` · `/test.pem` → **403** (920440 actif, exclusion strictement scopée)
+- SQLi · XSS → **403** (WAF protège toujours) ; `/acme/directory` → **200** ; `/health` → **200**
+- Test négatif **T3d** ajouté à `tests/pki/test_pki_integration.sh` (scoping strict).
+
+Aucun impact CLI/SPA (conf Coraza transparente). Codex APPROUVÉ.
+
 ## [0.6.6] — 2026-06-11
 
 ### Génération de certificat depuis /admin + CLI (issue #41, partie 2/2)

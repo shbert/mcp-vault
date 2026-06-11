@@ -157,7 +157,7 @@ Contrat pour le `CredentialBrokerService` de mcp-mission : livraison de credenti
 | `secret_consume(wrap_token, operation_id, mission_token)` | admin | Valide JWT ES256/JWKS, vérifie binding complet (mission_id, tenant_id, aud), unwrap OpenBao (C18) |
 
 > Activer la validation C18 avec `ENFORCE_MISSION_TOKEN_VALIDATION=true`. Par défaut (false) : log warning, continue — zéro impact standalone sans mcp-mission.
-> `tenant_id` et `expected_aud` dans `secret_wrap` alimentent le binding C18 complet côté `secret_consume` *(v0.6.6)*.
+> `tenant_id` et `expected_aud` dans `secret_wrap` alimentent le binding C18 complet côté `secret_consume` *(v0.6.7)*.
 
 ### Audit (1)
 
@@ -308,7 +308,7 @@ Le WAF protège l'API contre les attaques L7 (injections SQL, XSS, LFI, RCE, SSR
 - **Caddy v2.11.2** compilé avec **coraza-caddy v2.2.0** via `xcaddy`
 - **24 règles OWASP CoreRuleSet v4.7.0** chargées
 - Mode **Blocking sur TOUS les endpoints** (health, `/mcp`, `/admin/api`)
-- **2 exclusions ciblées** pour faux positifs JSON-RPC : Unicode français (920540), noms PowerShell (932120)
+- **Exclusions ciblées** (faux positifs JSON-RPC : Unicode français 920540, noms PowerShell 932120 ; distribution CA/CRL `.pem` 920440) déclarées **avant l'Include CRS** (pattern « exclusions before CRS ») — requis pour neutraliser les règles CRS en phase:1
 - **Headers de sécurité** : CSP, X-Frame-Options DENY, X-XSS-Protection, nosniff
 - Méthodes autorisées adaptées au protocole MCP : GET, POST, DELETE, PUT, PATCH
 
@@ -343,7 +343,7 @@ Les clés unseal d'OpenBao sont protégées par **séparation physique à 3 fact
 
 | Version              | Approche                                                                                                            |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **v0.6.6** (actuel)  | Clés sur S3 chiffrées AES-256-GCM+AAD, mémoire seule au runtime — hardening C18 : singleton JWT + binding complet tenant_id/aud |
+| **v0.6.7** (actuel)  | Clés sur S3 chiffrées AES-256-GCM+AAD, mémoire seule au runtime — hardening C18 : singleton JWT + binding complet tenant_id/aud |
 | **v1.0**             | Transit Auto-Unseal via OpenBao dédié (KMS Cloud Temple)                                                            |
 | **v2.0**             | **Connexion HSM** (Hardware Security Module) Cloud Temple — les clés ne quittent jamais le module matériel certifié |
 
@@ -406,10 +406,10 @@ mcp-vault/
 ├── Dockerfile                # Multi-stage (OpenBao 2.5.1 + Python 3.12)
 ├── requirements.txt          # Dépendances Python
 ├── requirements.lock         # Dépendances pinnées (versions exactes)
-├── VERSION                   # 0.6.6
+├── VERSION                   # 0.6.7
 ├── DESIGN/mcp-vault/
-│   ├── ARCHITECTURE.md       # Spécification détaillée (v0.6.6)
-│   ├── TECHNICAL.md          # Documentation technique (v0.6.6)
+│   ├── ARCHITECTURE.md       # Spécification détaillée (v0.6.7)
+│   ├── TECHNICAL.md          # Documentation technique (v0.6.7)
 │   └── SECURITY_AUDIT.md     # Rapport d'audit consolidé (60 findings V2.1)
 ├── scripts/
 │   ├── mcp_cli.py            # CLI entry point
@@ -466,4 +466,4 @@ mcp-vault/
 
 ---
 
-**Licence** : Apache 2.0 | **Auteur** : Cloud Temple | **Version** : 0.6.6
+**Licence** : Apache 2.0 | **Auteur** : Cloud Temple | **Version** : 0.6.7
