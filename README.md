@@ -63,7 +63,7 @@ Au démarrage, MCP Vault :
 
 ---
 
-## 🛠️ Outils MCP (32)
+## 🛠️ Outils MCP (35)
 
 ### System (2)
 
@@ -144,14 +144,18 @@ CA souveraine pour l'écosystème : les WAF Caddy s'enrôlent via ACME exactemen
 >
 > **`PKI_BASE_URL`** (optionnel) : URL de base pour les CDPs et le cluster path OpenBao ACME. Vide = déduit de `MCP_ALLOWED_HOSTS`. Override test Docker : `http://mcp-vault:8030`. Doit être `http(s)://`.
 
-### Consommation médiée — JWT mission_token (2) *(v0.6.x)*
+### JIT Wrap Broker + consommation médiée — C18 (4) *(v0.4.13 / v0.6.x)*
+
+Contrat pour le `CredentialBrokerService` de mcp-mission : livraison de credentials single-use via response wrapping OpenBao (cubbyhole), registry write-ahead sur S3 pour la compensation des orphelins, et validation anti-confused-deputy (C18).
 
 | Outil | Perm | Description |
 | --- | --- | --- |
 | `secret_wrap(vault_id, secret_path, mission_id, operation_id, ttl_seconds?, tenant_id?, expected_aud?)` | admin | Crée un wrap token single-use (write-ahead registry) |
+| `secret_revoke_wrap(lease_id)` | admin | Révocation idempotente d'un wrap token (introuvable = succès) |
+| `secret_wrap_lookup(operation_id)` | admin | Retrouve & révoque les wraps par operation_id (compensation orphelins #74) |
 | `secret_consume(wrap_token, operation_id, mission_token)` | admin | Valide JWT ES256/JWKS, vérifie binding complet (mission_id, tenant_id, aud), unwrap OpenBao (C18) |
 
-> Activer avec `ENFORCE_MISSION_TOKEN_VALIDATION=true`. Par défaut (false) : log warning, continue — zéro impact standalone sans mcp-mission.
+> Activer la validation C18 avec `ENFORCE_MISSION_TOKEN_VALIDATION=true`. Par défaut (false) : log warning, continue — zéro impact standalone sans mcp-mission.
 > `tenant_id` et `expected_aud` dans `secret_wrap` alimentent le binding C18 complet côté `secret_consume` *(v0.6.1)*.
 
 ### Audit (1)
@@ -374,7 +378,7 @@ docker compose exec mcp-vault python tests/test_e2e.py --test enforcement
 
 | Catégorie              | Tests  | Description                                                                        |
 | ---------------------- | ------ | ---------------------------------------------------------------------------------- |
-| Système                | 7      | health, about, services, tools_count (32)                                          |
+| Système                | 7      | health, about, services, tools_count (35)                                          |
 | Vault CRUD             | 28     | create + métadonnées, list, info + owner, update, delete, confirm, erreurs         |
 | Secrets CRUD           | 24     | 10 types écrits, read/list/delete, validation                                      |
 | Versioning             | 8      | v1→v2→v3, read latest, read spécifique                                             |
@@ -417,7 +421,7 @@ mcp-vault/
 │       └── shell.py          # Shell interactif
 ├── src/mcp_vault/
 │   ├── config.py             # Configuration pydantic-settings
-│   ├── server.py             # FastMCP + 32 outils MCP + lifecycle + audit
+│   ├── server.py             # FastMCP + 35 outils MCP + lifecycle + audit
 │   ├── lifecycle.py          # Orchestrateur startup/shutdown
 │   ├── s3_client.py          # Client S3 hybride SigV2/SigV4
 │   ├── s3_sync.py            # Sync file backend ↔ S3

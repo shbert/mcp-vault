@@ -52,7 +52,7 @@ Corrections de sécurité post-audit Codex v0.6.0. Aucun changement d'interface 
 
 Alignement de mcp-vault sur la matrice E2E C18 : comme mcp-teleport, mcp-vault valide désormais l'identité de mission avant de libérer un secret. Purement additif — zéro impact sur les déploiements standalone (sans mcp-mission).
 
-#### Nouvel outil MCP `secret_consume` (32 outils total)
+#### Nouvel outil MCP `secret_consume` (35 outils total)
 ```
 secret_consume(wrap_token, operation_id, mission_token) → secret_data
 ```
