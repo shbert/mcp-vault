@@ -100,6 +100,24 @@ else
   _fail "T3c" "/pki/ca/crl.pem — ${CRL:0:100}"
 fi
 
+# ── T3d : code HTTP 200 explicite + scoping strict de l'exclusion (issue #42) ──
+# Régression #37/#42 : l'exclusion 920440 (.pem) doit être effective (200) sur les
+# 3 fichiers connus ET strictement scopée (un .pem arbitraire reste bloqué 403).
+for f in root chain crl; do
+  CODE=$(curl -s -o /dev/null -w "%{http_code}" "$WAF/pki/ca/${f}.pem")
+  if [ "$CODE" = "200" ]; then
+    _ok "T3d : /pki/ca/${f}.pem → HTTP 200 (à travers le WAF)"
+  else
+    _fail "T3d" "/pki/ca/${f}.pem → HTTP $CODE (attendu 200 — exclusion 920440 inopérante ?)"
+  fi
+done
+EVIL_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$WAF/pki/ca/evil.pem")
+if [ "$EVIL_CODE" = "403" ]; then
+  _ok "T3d : /pki/ca/evil.pem → HTTP 403 (exclusion strictement scopée)"
+else
+  _fail "T3d" "/pki/ca/evil.pem → HTTP $EVIL_CODE (attendu 403 — scoping trop large !)"
+fi
+
 # ── T3 ACME directory ────────────────────────────────────────────────────────
 
 _sep "ACME directory accessible (non-auth)"
