@@ -421,7 +421,7 @@ mcp-vault/
 │       └── shell.py          # Interactive shell
 ├── src/mcp_vault/
 │   ├── config.py             # pydantic-settings configuration
-│   ├── server.py             # FastMCP + 32 MCP tools + lifecycle + audit
+│   ├── server.py             # FastMCP + 35 MCP tools + lifecycle + audit
 │   ├── lifecycle.py          # startup/shutdown orchestrator
 │   ├── s3_client.py          # Hybrid SigV2/SigV4 S3 client
 │   ├── s3_sync.py            # File backend ↔ S3 sync

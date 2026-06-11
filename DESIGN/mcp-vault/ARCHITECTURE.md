@@ -213,7 +213,7 @@ Pattern identique à MCP Tools, adapté au contexte Vault.
 #### Architecture
 
 ```
-AdminMiddleware (ASGI, outermost)
+AdminMiddleware (ASGI, derrière PkiMiddleware)
     │
     ├── GET /admin           → SPA HTML (admin.html)
     ├── GET /admin/static/*  → fichiers statiques (CSS, JS, images)
@@ -1356,7 +1356,7 @@ mcp-vault/
 ├── src/mcp_vault/
 │   ├── __init__.py
 │   ├── __main__.py            # python -m mcp_vault
-│   ├── server.py              # 20 outils MCP + create_app() + HealthCheckMiddleware + bannière
+│   ├── server.py              # 35 outils MCP + create_app() + middlewares + bannière
 │   ├── config.py              # Config Pydantic-settings (S3, OpenBao, sync, WAF)
 │   ├── admin/                 # Console d'administration web (/admin)
 │   │   ├── __init__.py
