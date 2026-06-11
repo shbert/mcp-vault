@@ -288,6 +288,12 @@ async def _handle_admin_routes(scope, receive, send, mcp, token_info):
         body = await _read_body(receive)
         return await _api_pki_setup(send, body)
 
+    if path == "/admin/api/pki/issue" and method == "POST":
+        if not is_admin:
+            return await _json_response(send, 403, {"status": "error", "message": "Permission admin requise"})
+        body = await _read_body(receive)
+        return await _api_pki_issue(send, body)
+
     # Rôles PKI — non-secret (configuration de l'autorité ACME), accessible à tout token valide
     # pour permettre le diagnostic sans droits admin. Les données exposées sont les domaines
     # autorisés, les flags TLS, les TTL — aucune clé privée ni secret.
@@ -949,6 +955,29 @@ async def _api_pki_setup(send, body):
     leaf_ttl = data.get("leaf_ttl", "720h")
     result = await setup_pki_ca(lab_mode, allowed_domains, leaf_ttl)
     await _json_response(send, 200 if result.get("status") == "ok" else 500, result)
+
+
+async def _api_pki_issue(send, body):
+    """POST /admin/api/pki/issue — Émettre un certificat manuel (admin).
+
+    La réponse contient la clé privée (one-shot). Pas d'audit de la clé.
+    """
+    from ..vault.pki_ca import issue_certificate
+    try:
+        data = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        data = {}
+    common_name = (data.get("common_name") or "").strip()
+    ttl = (data.get("ttl") or "720h").strip()
+    alt_names = (data.get("alt_names") or "").strip()
+    ip_sans = (data.get("ip_sans") or "").strip()
+    if not common_name:
+        return await _json_response(send, 400, {"status": "error", "message": "common_name requis"})
+    result = await issue_certificate(common_name, ttl, alt_names, ip_sans)
+    code = 200 if result.get("status") == "ok" else (
+        400 if result.get("error_type") in ("invalid_input", "domain_not_allowed") else 500
+    )
+    await _json_response(send, code, result)
 
 
 async def _api_pki_list_certs(send):

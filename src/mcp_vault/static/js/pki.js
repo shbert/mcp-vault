@@ -74,14 +74,17 @@ function _renderPkiPage(s, certs, roles, roleDetail) {
         </tr>`;
     }).join('') || '<tr><td colspan="5" class="empty-row">Aucun certificat émis</td></tr>';
 
-    const rotateBtn = isAdmin()
-        ? `<button class="btn btn-warn" onclick="pkiRotate()">Rotation intermédiaire</button>`
+    const actions = isAdmin()
+        ? `<div class="page-header-actions">
+               <button class="btn btn-primary" onclick="openModal('modalPkiIssue')">Générer un certificat</button>
+               <button class="btn btn-warn" onclick="pkiRotate()">Rotation intermédiaire</button>
+           </div>`
         : '';
 
     return `
     <div class="page-header">
         <h2>PKI Certificate Authority</h2>
-        ${rotateBtn}
+        ${actions}
     </div>
 
     <!-- Statut CA -->
@@ -242,4 +245,66 @@ async function doPkiSetup() {
     } else {
         alert('Erreur : ' + (result.message || '—'));
     }
+}
+
+/* ─── Génération de certificat (émission manuelle) ─── */
+async function doPkiIssue() {
+    const cn       = document.getElementById('pkiIssueCn').value.trim();
+    const ttl      = document.getElementById('pkiIssueTtl').value.trim() || '720h';
+    const altNames = document.getElementById('pkiIssueAltNames').value.trim();
+    const ipSans   = document.getElementById('pkiIssueIpSans').value.trim();
+
+    if (!cn) { alert('Common Name requis'); return; }
+
+    const btn = document.querySelector('#modalPkiIssue .btn-primary');
+    btn.disabled = true;
+    btn.textContent = 'Émission...';
+
+    const result = await api('/pki/issue', {
+        method: 'POST',
+        body: JSON.stringify({ common_name: cn, ttl, alt_names: altNames, ip_sans: ipSans }),
+    });
+
+    btn.disabled = false;
+    btn.textContent = 'Générer';
+
+    if (result.status === 'ok') {
+        closeModal('modalPkiIssue');
+        _pkiShowIssuedCert(result);
+        loadPki();
+    } else {
+        alert('Erreur : ' + (result.message || '—'));
+    }
+}
+
+/* Affiche le cert émis + clé privée UNE FOIS — pas de copie automatique
+   (la clé privée ne touche jamais le presse-papier sans action explicite). */
+function _pkiShowIssuedCert(result) {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay active';
+    // textContent uniquement pour les blocs PEM → aucun risque XSS
+    const cn = result.common_name || '?';
+    const serial = result.serial_number || '?';
+    const exp = result.expiration || '?';
+    ov.innerHTML = `
+        <div class="modal modal-lg">
+            <h2>Certificat émis — ${esc(cn)}</h2>
+            <div class="success-banner">Serial : ${esc(serial)} — expire : ${esc(String(exp))}</div>
+            <div class="error-banner">⚠️ Clé privée affichée une seule fois. Copiez-la et stockez-la maintenant.
+                Elle n'est ni stockée côté serveur, ni récupérable ensuite.</div>
+            <label>Clé privée</label>
+            <textarea class="mono-textarea" rows="7" readonly id="_issuedKey"></textarea>
+            <label>Certificat</label>
+            <textarea class="mono-textarea" rows="6" readonly id="_issuedCert"></textarea>
+            <label>Chaîne CA</label>
+            <textarea class="mono-textarea" rows="4" readonly id="_issuedChain"></textarea>
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Fermer</button>
+            </div>
+        </div>`;
+    document.body.appendChild(ov);
+    // Injecter le PEM via .value (jamais innerHTML) — pas d'exécution, pas de clipboard auto
+    ov.querySelector('#_issuedKey').value = result.private_key || '';
+    ov.querySelector('#_issuedCert').value = result.certificate || '';
+    ov.querySelector('#_issuedChain').value = result.ca_chain || '';
 }

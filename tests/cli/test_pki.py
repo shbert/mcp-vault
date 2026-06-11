@@ -47,7 +47,7 @@ def test_pki():
     section("Aide pki")
     r = run_cli(["pki", "--help"])
     check_value("pki --help exit code", r.exit_code, 0)
-    for subcmd in ["setup", "ca-key", "roles", "role-info", "certs", "revoke", "rotate"]:
+    for subcmd in ["setup", "ca-key", "roles", "role-info", "certs", "issue", "revoke", "rotate"]:
         check_contains(f"Sous-commande '{subcmd}'", r.output, subcmd)
 
     # ── pki setup ────────────────────────────────────────────────────────────
@@ -112,6 +112,24 @@ def test_pki():
     section("pki certs --limit abc — rejeté par Click (type=int)")
     r = run_cli(["pki", "certs", "--limit", "abc"])
     check_value("Exit code 2 pour type invalide", r.exit_code, 2)
+
+    # ── pki issue ────────────────────────────────────────────────────────────
+    section("pki issue <cn> — appelle pki_issue_cert avec CN, ttl, alt_names, ip_sans")
+    _PKI_ISSUE_OK = {"status": "ok", "common_name": "www.cloud-temple.app",
+                     "serial_number": "aa:bb", "certificate": "CERT",
+                     "private_key": "KEY", "ca_chain": "CHAIN", "expiration": 1800000000}
+    r, mock = run_cli_mocked(
+        ["pki", "issue", "www.cloud-temple.app", "--ttl", "2160h",
+         "--alt-names", "api.cloud-temple.app", "--ip-sans", "10.0.0.4"],
+        _PKI_ISSUE_OK,
+    )
+    check_value("Exit code", r.exit_code, 0)
+    args = mock.call_args[0][1] if mock.call_args else {}
+    check("pki_issue_cert appelé", mock.call_args is not None and mock.call_args[0][0] == "pki_issue_cert")
+    check_value("common_name transmis", args.get("common_name"), "www.cloud-temple.app")
+    check_value("ttl transmis", args.get("ttl"), "2160h")
+    check_value("alt_names transmis", args.get("alt_names"), "api.cloud-temple.app")
+    check_value("ip_sans transmis", args.get("ip_sans"), "10.0.0.4")
 
     # ── pki revoke ───────────────────────────────────────────────────────────
     section("pki revoke <serial> — appelle pki_revoke_cert")

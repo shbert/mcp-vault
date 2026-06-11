@@ -341,7 +341,7 @@ async def cmd_ssh(client, args="", json_output=False):
         show_ssh_result(result)
 
 
-PKI_OPS = ("setup", "ca-key", "roles", "role-info", "certs", "revoke", "rotate")
+PKI_OPS = ("setup", "ca-key", "roles", "role-info", "certs", "issue", "revoke", "rotate")
 
 
 async def cmd_pki(client, args="", json_output=False):
@@ -354,6 +354,7 @@ async def cmd_pki(client, args="", json_output=False):
         show_warning("  pki roles")
         show_warning("  pki role-info <role_name>")
         show_warning("  pki certs [--limit N]")
+        show_warning("  pki issue <common_name> [--ttl 720h] [--alt-names a,b] [--ip-sans 10.0.0.1]")
         show_warning("  pki revoke <serial>")
         show_warning("  pki rotate [--keep-old]")
         return
@@ -389,6 +390,28 @@ async def cmd_pki(client, args="", json_output=False):
             else:
                 i += 1
         result = await client.call_tool("pki_list_certs", {"limit": limit, "offset": offset})
+
+    elif op == "issue":
+        if len(parts) < 2:
+            show_warning("Usage: pki issue <common_name> [--ttl 720h] [--alt-names a,b] [--ip-sans IP]"); return
+        common_name = parts[1]
+        ttl = "720h"
+        alt_names = ""
+        ip_sans = ""
+        i = 2
+        while i < len(parts):
+            if parts[i] == "--ttl" and i + 1 < len(parts):
+                ttl = parts[i + 1]; i += 2
+            elif parts[i] == "--alt-names" and i + 1 < len(parts):
+                alt_names = parts[i + 1]; i += 2
+            elif parts[i] == "--ip-sans" and i + 1 < len(parts):
+                ip_sans = parts[i + 1]; i += 2
+            else:
+                i += 1
+        result = await client.call_tool("pki_issue_cert", {
+            "common_name": common_name, "ttl": ttl,
+            "alt_names": alt_names, "ip_sans": ip_sans,
+        })
 
     elif op == "revoke":
         if len(parts) < 2:

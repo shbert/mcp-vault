@@ -1,6 +1,6 @@
 # Architecture — MCP Vault
 
-> **Version** : 0.6.5 | **Date** : 2026-06-11 | **Auteur** : Cloud Temple  
+> **Version** : 0.6.6 | **Date** : 2026-06-11 | **Auteur** : Cloud Temple  
 > **Projet** : mcp-vault | **Licence** : Apache 2.0  
 > **Statut** : ✅ Implémenté — Production-ready (PKI interne v0.5.x + C18 v0.6.x)
 
@@ -71,7 +71,7 @@
 │  └────────────────────────────────────────────────────────────┘  │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
-│  │  35 Outils MCP (façade)                                    │  │
+│  │  36 Outils MCP (façade)                                    │  │
 │  │                                                            │  │
 │  │  Vaults :  vault_create, _list, _info, _update, _delete    │  │
 │  │  Secrets : secret_write, _read, _list, _delete             │  │
@@ -81,8 +81,8 @@
 │  │  SSH CA :  ssh_ca_setup, _sign_key, _public_key,           │  │
 │  │            _list_roles, _role_info                         │  │
 │  │  PKI :     pki_ca_setup, _public_key, _list_roles,         │  │
-│  │            _role_info, pki_list_certs, _revoke_cert,       │  │
-│  │            pki_ca_rotate_intermediate                      │  │
+│  │            _role_info, pki_list_certs, pki_issue_cert,     │  │
+│  │            _revoke_cert, pki_ca_rotate_intermediate        │  │
 │  │  Policies: policy_create, _list, _get, _delete             │  │
 │  │  Token :   token_update                                    │  │
 │  │  Audit :   audit_log                                       │  │
@@ -140,7 +140,7 @@
 | **HealthCheckMiddleware** | Health check HTTP (/health, /healthz, /ready)    | ASGI middleware               |
 | **AuthMiddleware**        | Auth Bearer Token + vault access + ContextVar    | ASGI middleware (starter-kit) |
 | **LoggingMiddleware**     | Logging requêtes + ring buffer mémoire           | ASGI middleware (starter-kit) |
-| **Outils MCP**            | Façade MCP (35 outils)                           | FastMCP (starter-kit)         |
+| **Outils MCP**            | Façade MCP (36 outils)                           | FastMCP (starter-kit)         |
 | **hvac client**           | Client Python vers OpenBao                       | `hvac` library                |
 | **OpenBao process**       | Moteur de secrets (chiffrement, policies, audit) | Binaire `bao` (Go, embedded)  |
 | **S3 Sync Manager**       | Synchronisation storage local ↔ S3               | boto3 + tar/gzip              |
@@ -191,7 +191,7 @@ de health check et retourne un JSON directement, **sans passer par MCP** ni par
 l'auth. Ceci permet au WAF/load balancer de vérifier l'état du service :
 
 ```json
-{"status": "healthy", "service": "mcp-vault", "version": "0.6.5", "transport": "streamable-http"}
+{"status": "healthy", "service": "mcp-vault", "version": "0.6.6", "transport": "streamable-http"}
 ```
 
 **AuthMiddleware + ContextVar** — Le middleware stocke les infos du token
@@ -507,7 +507,7 @@ vault-bucket/
 │                                 # ⚠️ JAMAIS stocké en clair — ni sur S3, ni localement
 │                                 # Le fichier local est supprimé après unseal
 │
-└── _meta.json                   # {version: "0.6.5", created_at: "...", vaults_count: 5}
+└── _meta.json                   # {version: "0.6.6", created_at: "...", vaults_count: 5}
 ```
 
 **Séparation données/clés** : Les secrets sont dans `openbao-data.tar.gz` (File storage chiffré par la barrier OpenBao, XChaCha20-Poly1305). Les clés unseal sont dans `_init/init_keys.json.enc` (chiffrées avec ADMIN_BOOTSTRAP_KEY). Sans les **deux** (données + clé de déchiffrement des unseal keys), les secrets sont illisibles. Cette séparation physique garantit qu'un vol du bucket S3 seul est insuffisant sans la `ADMIN_BOOTSTRAP_KEY` (variable d'environnement, jamais sur S3).
@@ -812,7 +812,7 @@ les rôles SSH) sans pouvoir modifier quoi que ce soit.
 
 > 💡 **Introspection** : l'endpoint `/admin/api/whoami` et la commande CLI `whoami` permettent de vérifier l'identité et les permissions du token courant (client_name, auth_type, permissions, vaults autorisés).
 
-**Total : 35 outils MCP** (5 vaults + 6 secrets + 4 wrap/broker C18 + 5 SSH CA + 7 PKI + 4 policies + 1 token + 1 audit + 2 system)
+**Total : 36 outils MCP** (5 vaults + 6 secrets + 4 wrap/broker C18 + 5 SSH CA + 8 PKI + 4 policies + 1 token + 1 audit + 2 system)
 
 #### 6.7.1 Architecture du journal d'audit
 
@@ -1356,7 +1356,7 @@ mcp-vault/
 ├── src/mcp_vault/
 │   ├── __init__.py
 │   ├── __main__.py            # python -m mcp_vault
-│   ├── server.py              # 35 outils MCP + create_app() + middlewares + bannière
+│   ├── server.py              # 36 outils MCP + create_app() + middlewares + bannière
 │   ├── config.py              # Config Pydantic-settings (S3, OpenBao, sync, WAF)
 │   ├── admin/                 # Console d'administration web (/admin)
 │   │   ├── __init__.py
@@ -2109,4 +2109,4 @@ result = await vault_client.call("ssh_sign_key", {
 
 ---
 
-*Document mis à jour le 11 juin 2026 — MCP Vault v0.6.5 (35 outils MCP, pile ASGI 6 couches avec PkiMiddleware, PKI interne CA + ACME, JIT Wrap Broker + consommation médiée C18, console admin web, WAF docker-compose, ContextVar, token cache TTL, ring buffer)*
+*Document mis à jour le 11 juin 2026 — MCP Vault v0.6.6 (36 outils MCP, pile ASGI 6 couches avec PkiMiddleware, PKI interne CA + ACME, JIT Wrap Broker + consommation médiée C18, console admin web, WAF docker-compose, ContextVar, token cache TTL, ring buffer)*

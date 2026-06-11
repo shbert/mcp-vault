@@ -162,6 +162,11 @@ python scripts/mcp_cli.py pki role-info acme-servers
 python scripts/mcp_cli.py pki certs
 python scripts/mcp_cli.py pki certs --limit 20
 
+# Émettre un certificat manuellement (hors ACME) — la clé privée s'affiche UNE FOIS
+python scripts/mcp_cli.py pki issue www.cloud-temple.app
+python scripts/mcp_cli.py pki issue api.cloud-temple.app --ttl 2160h --alt-names api2.cloud-temple.app
+python scripts/mcp_cli.py pki issue node1.cloud-temple.app --ip-sans 10.0.0.4
+
 # Révoquer un certificat
 python scripts/mcp_cli.py pki revoke 12:34:ab:cd:ef:12:34:56
 

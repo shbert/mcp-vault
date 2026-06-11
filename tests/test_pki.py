@@ -487,6 +487,151 @@ class TestEmptyInventoryNoneSafe:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Tests émission manuelle de certificat (issue #41)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestIssueCertificate:
+    """
+    pki_issue_cert : validation locale (CN/SAN vs allowed_domains, IP, TTL,
+    wildcard refusé) + émission + clé privée jamais loggée/auditée.
+    """
+
+    def _client_with_role(self, allowed_domains=None):
+        """Client mock : rôle ACME avec allowed_domains, émission renvoie cert+clé."""
+        allowed_domains = allowed_domains if allowed_domains is not None else ["*.cloud-temple.app", "cloud-temple.app"]
+        client = MagicMock()
+        client.read = MagicMock(return_value={
+            "data": {"allowed_domains": allowed_domains, "max_ttl": "8760h"}
+        })
+        client.write = MagicMock(return_value={
+            "data": {
+                "serial_number": "12:34:ab:cd",
+                "certificate": "-----BEGIN CERTIFICATE-----\nMOCK\n-----END CERTIFICATE-----",
+                "private_key": "-----BEGIN PRIVATE KEY-----\nSENSITIVE\n-----END PRIVATE KEY-----",
+                "ca_chain": ["-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----"],
+                "expiration": 1800000000,
+            }
+        })
+        return client
+
+    def test_issue_ok_nominal(self):
+        """CN dans le domaine autorisé → émission ok + clé privée retournée."""
+        from mcp_vault.vault.pki_ca import issue_certificate
+        client = self._client_with_role()
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=client), \
+             patch("mcp_vault.vault.pki_ca.is_pki_initialized", return_value=True), \
+             patch("mcp_vault.s3_sync.upload_to_s3", new_callable=AsyncMock, return_value=True):
+            r = _run(issue_certificate("www.cloud-temple.app", ttl="720h"))
+        assert r["status"] == "ok", f"{r}"
+        assert r["private_key"].startswith("-----BEGIN PRIVATE KEY")
+        assert r["serial_number"] == "12:34:ab:cd"
+        # émission via le rôle manual-servers (pas acme-servers)
+        issue_calls = [c for c in client.write.call_args_list if "issue/manual-servers" in str(c.args[0])]
+        assert issue_calls, "Émission doit passer par le rôle manual-servers"
+
+    def test_issue_domain_not_allowed(self):
+        """CN hors domaines autorisés → rejet AVANT émission (validation locale)."""
+        from mcp_vault.vault.pki_ca import issue_certificate
+        client = self._client_with_role(allowed_domains=["cloud-temple.app"])
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=client), \
+             patch("mcp_vault.vault.pki_ca.is_pki_initialized", return_value=True):
+            r = _run(issue_certificate("evil.attacker.com"))
+        assert r["status"] == "error"
+        assert r["error_type"] == "domain_not_allowed"
+        # OpenBao /issue ne doit PAS avoir été appelé
+        assert not any("issue/manual-servers" in str(c.args[0]) for c in client.write.call_args_list)
+
+    def test_issue_wildcard_refused(self):
+        """Wildcard interdit en émission manuelle."""
+        from mcp_vault.vault.pki_ca import issue_certificate
+        client = self._client_with_role()
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=client), \
+             patch("mcp_vault.vault.pki_ca.is_pki_initialized", return_value=True):
+            r = _run(issue_certificate("*.cloud-temple.app"))
+        assert r["status"] == "error" and r["error_type"] == "invalid_input"
+
+    def test_issue_bad_ttl(self):
+        """TTL au mauvais format → rejet."""
+        from mcp_vault.vault.pki_ca import issue_certificate
+        client = self._client_with_role()
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=client), \
+             patch("mcp_vault.vault.pki_ca.is_pki_initialized", return_value=True):
+            r = _run(issue_certificate("www.cloud-temple.app", ttl="forever"))
+        assert r["status"] == "error" and r["error_type"] == "invalid_input"
+
+    def test_issue_ttl_exceeds_max(self):
+        """TTL > max_ttl du rôle → rejet local (pas délégué à OpenBao)."""
+        from mcp_vault.vault.pki_ca import issue_certificate
+        client = self._client_with_role()  # max_ttl 8760h
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=client), \
+             patch("mcp_vault.vault.pki_ca.is_pki_initialized", return_value=True):
+            r = _run(issue_certificate("www.cloud-temple.app", ttl="99999h"))
+        assert r["status"] == "error" and r["error_type"] == "invalid_input"
+        assert not any("issue/manual-servers" in str(c.args[0]) for c in client.write.call_args_list)
+
+    def test_issue_allowed_domains_as_csv_string(self):
+        """allowed_domains renvoyé en CSV par OpenBao → normalisé en liste (pas d'itération char)."""
+        from mcp_vault.vault.pki_ca import issue_certificate
+        client = MagicMock()
+        client.read = MagicMock(return_value={"data": {"allowed_domains": "cloud-temple.app", "max_ttl": "8760h"}})
+        client.write = MagicMock(return_value={"data": {
+            "serial_number": "aa:bb", "certificate": "C", "private_key": "K", "ca_chain": "CH", "expiration": 1,
+        }})
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=client), \
+             patch("mcp_vault.vault.pki_ca.is_pki_initialized", return_value=True), \
+             patch("mcp_vault.s3_sync.upload_to_s3", new_callable=AsyncMock, return_value=True):
+            ok = _run(issue_certificate("api.cloud-temple.app"))
+            ko = _run(issue_certificate("evil.com"))
+        assert ok["status"] == "ok", f"sous-domaine valide doit passer: {ok}"
+        assert ko["status"] == "error" and ko["error_type"] == "domain_not_allowed"
+
+    def test_issue_bad_ip_san(self):
+        """IP SAN invalide → rejet AVANT émission."""
+        from mcp_vault.vault.pki_ca import issue_certificate
+        client = self._client_with_role()
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=client), \
+             patch("mcp_vault.vault.pki_ca.is_pki_initialized", return_value=True):
+            r = _run(issue_certificate("www.cloud-temple.app", ip_sans="999.999.0.1"))
+        assert r["status"] == "error" and r["error_type"] == "invalid_input"
+
+    def test_issue_alt_name_validated(self):
+        """Un alt_name hors domaine → rejet (pas seulement le CN)."""
+        from mcp_vault.vault.pki_ca import issue_certificate
+        client = self._client_with_role()
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=client), \
+             patch("mcp_vault.vault.pki_ca.is_pki_initialized", return_value=True):
+            r = _run(issue_certificate("www.cloud-temple.app", alt_names="evil.com"))
+        assert r["status"] == "error" and r["error_type"] == "domain_not_allowed"
+
+    def test_issue_private_key_not_in_audit(self):
+        """server.pki_issue_cert : la clé privée ne doit jamais entrer dans l'audit."""
+        audited = []
+
+        def mock_r(tool, result, vault_id="", detail=""):
+            audited.append(result)
+            return result
+
+        from unittest.mock import AsyncMock as _AM
+        mock_issue = _AM(return_value={
+            "status": "ok", "common_name": "www.cloud-temple.app",
+            "serial_number": "aa:bb", "certificate": "CERTPEM",
+            "private_key": "SUPERSECRETKEY", "ca_chain": "CHAIN", "expiration": 1,
+        })
+        with patch("mcp_vault.server._r", side_effect=mock_r), \
+             patch("mcp_vault.auth.context.check_admin_permission", return_value=None), \
+             patch("mcp_vault.auth.context.check_policy", return_value=None), \
+             patch("mcp_vault.vault.pki_ca.issue_certificate", new=mock_issue):
+            from mcp_vault.server import pki_issue_cert
+            r = _run(pki_issue_cert("www.cloud-temple.app"))
+        # le retour à l'appelant contient la clé (one-shot)
+        assert r["private_key"] == "SUPERSECRETKEY"
+        # mais l'audit ne doit JAMAIS la contenir
+        for a in audited:
+            assert "SUPERSECRETKEY" not in str(a), "Clé privée divulguée dans l'audit !"
+            assert "CERTPEM" not in str(a), "Certificat complet dans l'audit (inutile)"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Tests EAB policy — bug bloquant prod (issue #32)
 # ─────────────────────────────────────────────────────────────────────────────
 
