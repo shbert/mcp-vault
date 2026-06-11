@@ -445,6 +445,8 @@ async def secret_wrap(
     mission_id: str,
     operation_id: str,
     ttl_seconds: int = 300,
+    tenant_id: str = "",
+    expected_aud: str = "",
 ) -> dict:
     """
     Crée un wrap token single-use pour (vault_id, secret_path) scopé à une mission JIT.
@@ -474,6 +476,18 @@ async def secret_wrap(
     if ttl_seconds < 60 or ttl_seconds > 3600:
         return {"status": "error", "message": "ttl_seconds doit être entre 60 et 3600"}
 
+    # En mode ENFORCE=true + JWKS configuré : enrichir expected_aud automatiquement
+    # pour garantir le binding complet côté secret_consume (ÉLEVÉ — issue #29).
+    # Les wraps créés sans expected_aud auraient un binding mission_id-only.
+    if settings.enforce_mission_token_validation and settings.mission_jwks_url:
+        if not expected_aud:
+            if settings.mission_token_aud:
+                expected_aud = settings.mission_token_aud
+            else:
+                return {"status": "error", "error_type": "misconfigured",
+                        "message": "expected_aud requis en mode ENFORCE=true "
+                                   "(configurer MISSION_TOKEN_AUD)"}
+
     # Vérification d'accès au vault (owner/allowed_resources) + policy path
     access_err = check_access(vault_id)
     if access_err:
@@ -482,7 +496,8 @@ async def secret_wrap(
     if path_err:
         return path_err
 
-    result = await wrap_secret(vault_id, secret_path, mission_id, operation_id, ttl_seconds)
+    result = await wrap_secret(vault_id, secret_path, mission_id, operation_id, ttl_seconds,
+                               tenant_id=tenant_id, expected_aud=expected_aud)
     # Ne pas logguer le wrap_token dans l'audit — seuls les champs non-sensibles
     audit_result = {k: v for k, v in result.items() if k != "wrap_token"}
     _r("secret_wrap", audit_result, vault_id, f"op={operation_id[:32]}")
@@ -603,29 +618,28 @@ async def secret_consume(
 
     # ── Validation JWT (si JWKS configuré) ──────────────────────────
     if jwks_url:
-        try:
-            from .auth.jwt_validator import MissionTokenValidator, MissionTokenError
-
-            validator = MissionTokenValidator(
-                jwks_url=jwks_url,
-                expected_aud=settings.mission_token_aud,
-                cache_ttl=settings.mission_jwks_cache_ttl,
-                max_refresh_per_min=settings.mission_jwks_max_refresh_per_min,
-                leeway_seconds=settings.mission_token_leeway_seconds,
-            )
-            jwt_claims = validator.validate(mission_token)
-            mission_id = jwt_claims.get("mission_id", "")
-
-        except Exception as e:
-            reason = getattr(e, "reason", "jwt_validation_failed")
-            logger.warning("secret_consume JWT rejected: %s", reason)
+        from .auth.jwt_validator import get_mission_token_validator, MissionTokenError
+        validator = get_mission_token_validator()
+        if validator is None:
+            # Singleton absent = lifecycle échoué ou JWKS_URL ajouté à chaud.
+            # Fail-close en mode enforced ; sinon log warning et continue.
             if enforce:
-                return {"status": "error", "error_type": "jwt_invalid",
-                        "message": f"Mission token invalide : {reason}"}
-            # Mode non-enforced : continue sans mission_id du JWT
-            logger.warning(
-                "secret_consume : JWT invalide ignoré (ENFORCE=false) — reason=%s", reason
-            )
+                return {"status": "error", "error_type": "misconfigured",
+                        "message": "Mission Token Validator non initialisé — redémarrer le service"}
+            logger.warning("secret_consume : singleton JWT absent (ENFORCE=false) — JWT non validé")
+        else:
+            try:
+                jwt_claims = validator.validate(mission_token)
+                mission_id = jwt_claims.get("mission_id", "")
+            except Exception as e:
+                reason = getattr(e, "reason", "jwt_validation_failed")
+                logger.warning("secret_consume JWT rejected: %s", reason)
+                if enforce:
+                    return {"status": "error", "error_type": "jwt_invalid",
+                            "message": f"Mission token invalide : {reason}"}
+                logger.warning(
+                    "secret_consume : JWT invalide ignoré (ENFORCE=false) — reason=%s", reason
+                )
 
     elif enforce:
         # ENFORCE=true mais pas de JWKS configuré → incohérence config
@@ -646,11 +660,19 @@ async def secret_consume(
                         "message": f"Mission non active : {status_reason}"}
 
     # ── Consommation médiée ─────────────────────────────────────────
-    # mission_id depuis JWT (si disponible) ou fallback sur operation_id lookup
+    # Extraire tenant_id depuis les claims JWT.
+    # expected_aud utilise settings.mission_token_aud (validé par PyJWT decode) — pas
+    # jwt_claims["aud"] qui peut être une liste non-ordonnée (MOYEN — issue #29).
+    tenant_id_from_jwt = jwt_claims.get("tenant_id", "") if jwt_claims else ""
+    expected_aud_from_jwt = settings.mission_token_aud
+
     result = await consume_wrap_secret(
         wrap_token=wrap_token,
         operation_id=operation_id,
         mission_id=mission_id or "",
+        tenant_id=tenant_id_from_jwt,
+        expected_aud=expected_aud_from_jwt,
+        enforce=enforce,
     )
 
     # Audit : jamais wrap_token, jamais mission_token, jamais le secret data

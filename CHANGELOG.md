@@ -1,12 +1,58 @@
 # Changelog — MCP Vault
 
+## [0.6.1] — 2026-06-11
+
+### Hardening C18 — singleton JWT + binding complet tenant_id/aud (issue #29)
+
+Corrections de sécurité post-audit Codex v0.6.0. Aucun changement d'interface publique.
+
+#### P0 — MissionTokenValidator singleton process-wide
+`secret_consume` réinstanciait `MissionTokenValidator` à chaque appel : le cache JWKS (60s) et le rate-limit (3 refreshes/min) étaient donc par-requête et non globaux.
+
+- `auth/jwt_validator.py` : `init_mission_token_validator()` + `get_mission_token_validator()` — singleton module-level
+- `lifecycle.py` : initialisation au startup (step 1e) — un seul validateur partagé pour tout le processus
+- `server.py` : `secret_consume` utilise le singleton. Fail-close si singleton absent + `ENFORCE=true` (erreur `misconfigured`)
+
+#### P1 — Binding C18 complet : tenant_id + expected_aud propagés
+`tenant_id` et `expected_aud` étaient stockés dans le registry mais jamais renseignés par le flux réel (`secret_wrap` → `wrap_secret` → `register_pending` ne les passait pas) : le binding dans `consume_wrap_secret` était donc systématiquement ignoré en production.
+
+- `vault/wrapping.py` : `wrap_secret()` + `register_pending()` acceptent `tenant_id` et `expected_aud`
+- `server.py` : `secret_wrap` MCP accepte `tenant_id` et `expected_aud` (optionnels, rétrocompat)
+- `server.py` : `expected_aud_from_jwt = settings.mission_token_aud` (audience validée par PyJWT, pas `jwt_claims["aud"]` qui peut être une liste non-ordonnée)
+- Messages d'erreur `binding_mismatch` rendus génériques (ne révèlent plus le champ en échec)
+
+#### Corrections additionnelles (3ème+4ème passe Codex)
+- `secret_wrap` : en mode `ENFORCE=true` + JWKS, impose `expected_aud = settings.mission_token_aud` automatiquement si non fourni (wraps toujours bindés en mode enforced). Erreur `misconfigured` si `MISSION_TOKEN_AUD` est vide.
+- `consume_wrap_secret` : en mode `enforce=True`, rejette les wraps sans `expected_aud` avec `binding_incomplete` (protège contre les wraps legacy en mode enforced)
+- `expected_aud_from_jwt` dans `secret_consume` utilise `settings.mission_token_aud` (audience validée par PyJWT, pas `jwt_claims["aud"]` qui peut être une liste)
+
+#### Tests non-complaisant ajoutés (10 tests)
+- Singleton réutilisé entre appels (pas réinstancié)
+- Fail-close si singleton absent + ENFORCE=true
+- `secret_wrap` enrichit `expected_aud` automatiquement en mode ENFORCE=true
+- `tenant_id` mismatch → rejeté avant `try_mark_consuming` (pas d'état orphelin)
+- `expected_aud` mismatch → confused-deputy bloqué (message générique)
+- Wrap legacy sans `expected_aud` → `binding_incomplete` en mode enforced
+- Binding correct → consume nominal
+- Rétrocompatibilité : champs vides dans le registry → binding ignoré (mode standalone)
+- Propagation `tenant_id`/`expected_aud` de `wrap_secret` vers le registry
+- Vérification que `try_mark_consuming` n'est pas appelé si binding mismatch
+
+### Fichiers modifiés
+- `src/mcp_vault/auth/jwt_validator.py` — singleton
+- `src/mcp_vault/lifecycle.py` — init singleton au startup
+- `src/mcp_vault/server.py` — secret_wrap + secret_consume
+- `src/mcp_vault/vault/wrapping.py` — wrap_secret + consume_wrap_secret
+- `tests/test_jwt_validator.py` — +2 tests non-complaisant
+- `tests/test_wrap.py` — +6 tests non-complaisant
+
 ## [0.6.0] — 2026-06-10
 
 ### Anti-confused-deputy C18 — validation JWT mission_token ES256/JWKS (issue #26)
 
 Alignement de mcp-vault sur la matrice E2E C18 : comme mcp-teleport, mcp-vault valide désormais l'identité de mission avant de libérer un secret. Purement additif — zéro impact sur les déploiements standalone (sans mcp-mission).
 
-#### Nouvel outil MCP `secret_consume` (32 outils total)
+#### Nouvel outil MCP `secret_consume` (35 outils total)
 ```
 secret_consume(wrap_token, operation_id, mission_token) → secret_data
 ```

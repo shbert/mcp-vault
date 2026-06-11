@@ -82,7 +82,25 @@ async def vault_startup() -> bool:
     except Exception as e:
         logger.error(f"❌ Wrap Registry : {e}")
 
-    # ── 1e. PKI CA (vérification état au démarrage) ───────────────
+    # ── 1e. Mission Token Validator (C18, singleton process-wide) ──────────────
+    logger.info("🔐 Initialisation du Mission Token Validator...")
+    try:
+        from .auth.jwt_validator import init_mission_token_validator
+        _v = init_mission_token_validator(
+            jwks_url=settings.mission_jwks_url,
+            expected_aud=settings.mission_token_aud,
+            cache_ttl=settings.mission_jwks_cache_ttl,
+            max_refresh_per_min=settings.mission_jwks_max_refresh_per_min,
+            leeway_seconds=settings.mission_token_leeway_seconds,
+        )
+        if _v:
+            logger.info("✅ Mission Token Validator prêt (JWKS configuré)")
+        else:
+            logger.info("ℹ️  Mission Token Validator non configuré (MISSION_JWKS_URL vide — mode standalone)")
+    except Exception as e:
+        logger.error(f"❌ Mission Token Validator : {e}")
+
+    # ── 1f. PKI CA (vérification état au démarrage) ───────────────
     logger.info("🔐 Vérification PKI CA...")
     try:
         from .vault.pki_ca import is_pki_initialized

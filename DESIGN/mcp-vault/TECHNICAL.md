@@ -1,6 +1,6 @@
 # Documentation Technique — MCP Vault
 
-> **Version** : 0.6.0 | **Date** : 2026-06-10 | **Auteur** : Cloud Temple
+> **Version** : 0.6.1 | **Date** : 2026-06-11 | **Auteur** : Cloud Temple
 > **Licence** : Apache 2.0 | **Statut** : ✅ Production-ready (audit V2.1 complété + PKI interne v0.5.1)
 
 ---
@@ -44,11 +44,12 @@ MCP Vault est un serveur MCP (Model Context Protocol) qui fournit une gestion s�
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │ Stack ASGI (6 couches)                                   │  │
 │  │                                                          │  │
+│  │  PkiMiddleware      → /acme/*, /pki/ca/*.pem (no-auth)   │  │
 │  │  AdminMiddleware    → /admin, /admin/api/*               │  │
 │  │  HealthCheckMiddleware → /health, /healthz, /ready       │  │
 │  │  AuthMiddleware     → Bearer token → contextvars         │  │
 │  │  LoggingMiddleware  → stderr + ring buffer (200 entrées) │  │
-│  │  FastMCP            → /mcp (Streamable HTTP, 32 outils)  │  │
+│  │  FastMCP            → /mcp (Streamable HTTP, 35 outils)  │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                                                                │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
@@ -340,17 +341,21 @@ Non-authentifié par design (RFC 8555 ACME + JWS). Anti-traversal sur acme_suffi
 
 **Admin REST** *(v0.5.1)* : `GET /admin/api/pki/roles` et `GET /admin/api/pki/roles/{role_name}` — info non-secrète (configuration du rôle ACME), accessible à tout token valide pour diagnostic.
 
-### 3.11c `auth/jwt_validator.py` — Validateur JWT mission_token *(v0.6.0)*
+### 3.11c `auth/jwt_validator.py` — Validateur JWT mission_token *(v0.6.1)*
 
-Validation JWT ES256/JWKS pour l'anti-confused-deputy C18 (issue #26).
+Validation JWT ES256/JWKS pour l'anti-confused-deputy C18 (issue #26). Singleton process-wide depuis v0.6.1 (issue #29).
 
 | Classe/Fonction | Description |
 | --- | --- |
 | `MissionTokenValidator(jwks_url, expected_aud, cache_ttl, ...)` | Validateur thread-safe. Cache JWKS TTL-borné (60s), refresh kid inconnu, rate-limit 3/min |
 | `validate(token_compact)` → dict | ES256, iss=mcp-mission, aud, exp+leeway, mission_id requis. Jamais le token dans les erreurs. |
 | `MissionTokenError(reason)` | reason = code machine ("invalid_signature", "token_expired", "kid_unknown_or_revoked"...) |
+| `init_mission_token_validator(jwks_url, ...)` | Initialise le singleton au startup (lifecycle.py step 1e). Retourne None si jwks_url vide. |
+| `get_mission_token_validator()` | Retourne le singleton process-wide. None si non configuré. |
 
 **Thread-safety** : `threading.Lock` protège le cache JWKS et la fenêtre glissante du rate-limit. `_fetch_jwks_from_url()` est toujours appelé sous ce lock.
+
+**Singleton process-wide** : un seul `MissionTokenValidator` pour tout le processus. Le cache JWKS (60s) et le rate-limit (3 refreshes/min) sont ainsi effectivement globaux. `secret_consume` utilise `get_mission_token_validator()` — fail-close si absent en mode `ENFORCE=true`.
 
 **Standalone** : si `MISSION_JWKS_URL` est vide, le validateur n'est pas instancié et `secret_consume` fonctionne en mode non-enforced.
 
@@ -720,7 +725,7 @@ Voir `ARCHITECTURE.md §7.8` pour les détails complets.
 
 | Version             | Mécanisme                                    | Où vivent les clés         | Niveau         |
 | ------------------- | -------------------------------------------- | -------------------------- | -------------- |
-| **v0.4.5** (actuel) | AES-256-GCM+AAD + PBKDF2 + bootstrap key env | Mémoire Python au runtime  | 🟡 Bonne      |
+| **v0.6.1** (actuel) | AES-256-GCM+AAD + PBKDF2 + bootstrap key env | Mémoire Python au runtime  | 🟡 Bonne      |
 | **v1.0**            | Transit Auto-Unseal via OpenBao KMS dédié    | KMS dédié (Shamir 5/3)     | 🟢 Excellente |
 | **v2.0**            | HSM matériel (PKCS#11 / KMIP)                | HSM certifié FIPS 140-2 L3 | 🟢 Maximale   |
 
