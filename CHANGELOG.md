@@ -1,5 +1,28 @@
 # Changelog — MCP Vault
 
+## [0.6.2] — 2026-06-11
+
+### Fix PKI mode Prod — eab_policy invalide (issue #32)
+
+L'initialisation de la PKI interne en mode **Prod** (`lab_mode=False`) échouait systématiquement à l'étape `config/acme`.
+
+#### Bug bloquant
+- `vault/pki_ca.py` : `eab_policy="required"` **n'existe pas** dans OpenBao (valeurs valides : `not-required`, `new-account-required`, `always-required`). Tout setup prod échouait avec `invalid eab policy name provided`.
+- Correctif : `eab_policy = "not-required"` (lab) / `"new-account-required"` (prod) — l'EAB est exigé à la création de compte ACME, ce qui bloque l'enrôlement public non authentifié sans casser les comptes existants.
+
+#### Bugs secondaires (cohérence status)
+- `eab_required` était calculé via `eab_policy == "required"` (jamais vrai) → helper `_eab_required()` (`new-account-required`/`always-required` → True).
+- `eab_policy` désormais exposé dans les retours `setup_pki_ca()` et `get_pki_status()`.
+
+#### Réserves ACME traitées
+- **`allowed_response_headers`** : le mount intermédiaire est tuné pour autoriser les headers ACME (`Replay-Nonce`, `Link`, `Location`) — sinon OpenBao les strippe et l'enrôlement ACME réel (T1/T7) échoue.
+- **`sign-intermediate`** : `issuer_ref` déplacé du body vers le path `/issuer/mcp-vault-root/sign-intermediate` (forme documentée OpenBao).
+
+#### Tests
+- 8 tests non-complaisant (`tests/test_pki.py::TestEabPolicyProd`) : inspection du payload réel `config/acme`, helper `_eab_required`, tuning headers (+ fail-hard si KO), path sign-intermediate (setup + rotation). 43/43 tests PKI verts.
+
+> **Note de remédiation prod** : l'échec laissait un état partiel (root + intermédiaire + rôle ACME créés, `config/acme` manquant). Le setup étant idempotent, un simple retry après ce fix termine l'initialisation — aucun nettoyage requis.
+
 ## [0.6.1] — 2026-06-11
 
 ### Hardening C18 — singleton JWT + binding complet tenant_id/aud (issue #29)

@@ -30,6 +30,21 @@ _ROOT_MOUNT = "_sys_pki_root"
 _INT_MOUNT = "_sys_pki_int"
 _ACME_ROLE_NAME = "acme-servers"
 
+# Politiques EAB valides côté OpenBao (config/acme). "required" N'EXISTE PAS —
+# valeurs acceptées : not-required, new-account-required, always-required.
+# Lab : pas d'EAB (enrôlement libre). Prod : EAB exigé à la création de compte
+# (bloque l'enrôlement public non authentifié sans casser les comptes existants).
+_EAB_POLICY_LAB = "not-required"
+_EAB_POLICY_PROD = "new-account-required"
+# Headers de réponse ACME (RFC 8555) qu'OpenBao doit être autorisé à renvoyer ;
+# sinon ils sont strippés et l'enrôlement ACME réel échoue.
+_ACME_RESPONSE_HEADERS = ["Replay-Nonce", "Link", "Location"]
+
+
+def _eab_required(eab_policy: str) -> bool:
+    """True si la politique EAB impose un External Account Binding."""
+    return eab_policy in ("new-account-required", "always-required")
+
 # Préfixe protégé — utilisé dans spaces.py et server.py pour refuser vault_delete
 RESERVED_MOUNT_PREFIX = "_sys_pki_"
 
@@ -211,6 +226,24 @@ async def setup_pki_ca(lab_mode: bool = True,
             # ── 2. CA Intermédiaire ─────────────────────────────────────────
             _mount_pki_engine(client, _INT_MOUNT, "43800h")
 
+            # Autoriser OpenBao à renvoyer les headers de réponse ACME (RFC 8555).
+            # Sans ce tuning, OpenBao strippe Replay-Nonce/Link/Location et
+            # l'enrôlement ACME (newNonce, newOrder) échoue côté client — y compris
+            # en lab. C'est un prérequis dur : on fait échouer le setup si le tuning
+            # échoue, plutôt que d'annoncer une PKI opérationnelle qui ne l'est pas.
+            try:
+                client.sys.tune_mount_configuration(
+                    path=_INT_MOUNT,
+                    allowed_response_headers=_ACME_RESPONSE_HEADERS,
+                )
+                logger.info("✅ Tuning ACME headers : %s", ", ".join(_ACME_RESPONSE_HEADERS))
+            except Exception as e:
+                logger.error("❌ Tuning allowed_response_headers échoué : %s", type(e).__name__)
+                raise RuntimeError(
+                    "Tuning ACME headers (Replay-Nonce/Link/Location) échoué — "
+                    "l'enrôlement ACME serait cassé ; setup PKI interrompu"
+                ) from e
+
             try:
                 csr_resp = client.write(
                     f"{_INT_MOUNT}/intermediate/generate/internal",
@@ -223,12 +256,13 @@ async def setup_pki_ca(lab_mode: bool = True,
                 )
                 csr = csr_resp["data"]["csr"]
 
+                # issuer_ref est un paramètre de PATH (pas de body) dans l'API OpenBao :
+                # /issuer/:issuer_ref/sign-intermediate.
                 sign_resp = client.write(
-                    f"{_ROOT_MOUNT}/root/sign-intermediate",
+                    f"{_ROOT_MOUNT}/issuer/mcp-vault-root/sign-intermediate",
                     csr=csr,
                     format="pem_bundle",
                     ttl="43800h",
-                    issuer_ref="mcp-vault-root",
                 )
                 signed_cert = sign_resp["data"]["certificate"]
 
@@ -289,15 +323,16 @@ async def setup_pki_ca(lab_mode: bool = True,
             logger.info(f"✅ Cluster path PKI configuré : {_cluster_path}")
 
             # ── 4. Serveur ACME ─────────────────────────────────────────────
+            eab_policy = _EAB_POLICY_LAB if lab_mode else _EAB_POLICY_PROD
             client.write(
                 f"{_INT_MOUNT}/config/acme",
                 enabled=True,
                 default_directory_policy=f"role:{_ACME_ROLE_NAME}",
                 allowed_roles=[_ACME_ROLE_NAME],
                 allowed_issuers=["*"],
-                eab_policy="not-required" if lab_mode else "required",
+                eab_policy=eab_policy,
             )
-            logger.info("✅ Serveur ACME activé")
+            logger.info("✅ Serveur ACME activé (eab_policy=%s)", eab_policy)
 
             # ── 5. Sync S3 forcée ───────────────────────────────────────────
             from ..s3_sync import upload_to_s3
@@ -323,7 +358,8 @@ async def setup_pki_ca(lab_mode: bool = True,
                 "root_fingerprint_sha256": root_fp,
                 "allowed_domains": allowed_domains,
                 "leaf_ttl": leaf_ttl,
-                "eab_required": not lab_mode,
+                "eab_policy": eab_policy,
+                "eab_required": _eab_required(eab_policy),
                 "s3_sync_ok": sync_ok,
             }
         except Exception as e:
@@ -396,7 +432,8 @@ async def get_pki_status() -> dict:
             "int_expires": int_expires,
             "cert_count": cert_count,
             "acme_enabled": acme_enabled,
-            "eab_required": eab_policy == "required",
+            "eab_policy": eab_policy,
+            "eab_required": _eab_required(eab_policy),
             "acme_directory": f"{base}/acme/directory",
             "root_pem_url": f"{base}/pki/ca/root.pem",
             "chain_pem_url": f"{base}/pki/ca/chain.pem",
@@ -597,12 +634,12 @@ async def rotate_intermediate(keep_old_issuer: bool = True,
         )
         csr = csr_resp["data"]["csr"]
 
+        # issuer_ref est un paramètre de PATH (cf. setup_pki_ca) — pas de body.
         sign_resp = client.write(
-            f"{_ROOT_MOUNT}/root/sign-intermediate",
+            f"{_ROOT_MOUNT}/issuer/mcp-vault-root/sign-intermediate",
             csr=csr,
             format="pem_bundle",
             ttl="43800h",
-            issuer_ref="mcp-vault-root",
         )
         signed_cert = sign_resp["data"]["certificate"]
 

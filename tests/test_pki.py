@@ -406,6 +406,194 @@ class TestS3SyncAfterMutations:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Tests EAB policy — bug bloquant prod (issue #32)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestEabPolicyProd:
+    """
+    Issue #32 : eab_policy="required" était invalide pour OpenBao (mode Prod KO).
+    Tests non-complaisant : inspectent le payload RÉEL envoyé à config/acme,
+    pas seulement le dict de retour.
+    """
+
+    def _mock_hvac(self):
+        client = MagicMock()
+        client.sys.enable_secrets_engine = MagicMock()
+        client.sys.tune_mount_configuration = MagicMock()
+        client.write = MagicMock(return_value={
+            "data": {
+                "certificate": "",
+                "csr": "-----BEGIN CERTIFICATE REQUEST-----\nMOCK\n-----END CERTIFICATE REQUEST-----",
+            }
+        })
+        client.read = MagicMock(return_value={"data": {}})
+        return client
+
+    def _acme_write_kwargs(self, mock_client):
+        """Retourne les kwargs du write vers config/acme (ou None)."""
+        for call in mock_client.write.call_args_list:
+            args, kwargs = call
+            if args and str(args[0]).endswith("config/acme"):
+                return kwargs
+        return None
+
+    def test_prod_mode_sends_valid_eab_policy(self):
+        """
+        BLOQUANT — en lab_mode=False, config/acme reçoit "new-account-required"
+        et JAMAIS "required" (valeur rejetée par OpenBao).
+        """
+        from mcp_vault.vault.pki_ca import setup_pki_ca
+
+        mock_client = self._mock_hvac()
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=mock_client), \
+             patch("mcp_vault.s3_sync.upload_to_s3", new_callable=AsyncMock, return_value=True), \
+             patch("mcp_vault.vault.pki_ca._read_pem_url", new_callable=AsyncMock, return_value=_MOCK_CERT_PEM):
+            result = _run(setup_pki_ca(lab_mode=False, allowed_domains=["prod.example.com"]))
+
+        assert result["status"] == "ok", f"Setup prod KO : {result}"
+        acme_kwargs = self._acme_write_kwargs(mock_client)
+        assert acme_kwargs is not None, "Aucun write vers config/acme"
+        assert acme_kwargs["eab_policy"] == "new-account-required", (
+            f"eab_policy invalide : {acme_kwargs['eab_policy']!r}"
+        )
+        assert acme_kwargs["eab_policy"] != "required", "Régression : 'required' rejeté par OpenBao !"
+
+    def test_lab_mode_sends_not_required(self):
+        """lab_mode=True → config/acme reçoit 'not-required'."""
+        from mcp_vault.vault.pki_ca import setup_pki_ca
+
+        mock_client = self._mock_hvac()
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=mock_client), \
+             patch("mcp_vault.s3_sync.upload_to_s3", new_callable=AsyncMock, return_value=True), \
+             patch("mcp_vault.vault.pki_ca._read_pem_url", new_callable=AsyncMock, return_value=_MOCK_CERT_PEM):
+            result = _run(setup_pki_ca(lab_mode=True, allowed_domains=["test.lan"]))
+
+        acme_kwargs = self._acme_write_kwargs(mock_client)
+        assert acme_kwargs["eab_policy"] == "not-required"
+        assert result["eab_required"] is False
+        assert result["eab_policy"] == "not-required"
+
+    def test_prod_mode_result_eab_required_true(self):
+        """lab_mode=False → retour setup expose eab_required=True + eab_policy."""
+        from mcp_vault.vault.pki_ca import setup_pki_ca
+
+        mock_client = self._mock_hvac()
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=mock_client), \
+             patch("mcp_vault.s3_sync.upload_to_s3", new_callable=AsyncMock, return_value=True), \
+             patch("mcp_vault.vault.pki_ca._read_pem_url", new_callable=AsyncMock, return_value=_MOCK_CERT_PEM):
+            result = _run(setup_pki_ca(lab_mode=False, allowed_domains=["prod.example.com"]))
+
+        assert result["eab_required"] is True, "eab_required doit être True en prod"
+        assert result["eab_policy"] == "new-account-required"
+
+    def test_eab_required_helper(self):
+        """_eab_required : True pour new-account/always-required, False sinon."""
+        from mcp_vault.vault.pki_ca import _eab_required
+        assert _eab_required("new-account-required") is True
+        assert _eab_required("always-required") is True
+        assert _eab_required("not-required") is False
+        assert _eab_required("required") is False, "'required' n'existe pas → ne doit pas activer EAB"
+        assert _eab_required("unknown") is False
+
+    def test_allowed_response_headers_tuned(self):
+        """
+        Réserve #1 — le mount intermédiaire est tuné pour autoriser les
+        headers ACME (Replay-Nonce, Link, Location).
+        """
+        from mcp_vault.vault.pki_ca import setup_pki_ca, _ACME_RESPONSE_HEADERS
+
+        mock_client = self._mock_hvac()
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=mock_client), \
+             patch("mcp_vault.s3_sync.upload_to_s3", new_callable=AsyncMock, return_value=True), \
+             patch("mcp_vault.vault.pki_ca._read_pem_url", new_callable=AsyncMock, return_value=_MOCK_CERT_PEM):
+            _run(setup_pki_ca(lab_mode=False, allowed_domains=["prod.example.com"]))
+
+        tune_calls = mock_client.sys.tune_mount_configuration.call_args_list
+        assert tune_calls, "tune_mount_configuration jamais appelé"
+        found = any(
+            c.kwargs.get("allowed_response_headers") == _ACME_RESPONSE_HEADERS
+            for c in tune_calls
+        )
+        assert found, f"allowed_response_headers ACME non tunés : {tune_calls}"
+
+    def test_sign_intermediate_uses_issuer_path(self):
+        """
+        Réserve #2 — sign-intermediate via /issuer/:ref/sign-intermediate
+        (path), pas issuer_ref dans le body.
+        """
+        from mcp_vault.vault.pki_ca import setup_pki_ca
+
+        mock_client = self._mock_hvac()
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=mock_client), \
+             patch("mcp_vault.s3_sync.upload_to_s3", new_callable=AsyncMock, return_value=True), \
+             patch("mcp_vault.vault.pki_ca._read_pem_url", new_callable=AsyncMock, return_value=_MOCK_CERT_PEM):
+            _run(setup_pki_ca(lab_mode=False, allowed_domains=["prod.example.com"]))
+
+        sign_calls = [
+            c for c in mock_client.write.call_args_list
+            if c.args and "sign-intermediate" in str(c.args[0])
+        ]
+        assert sign_calls, "Aucun appel sign-intermediate"
+        for c in sign_calls:
+            assert "/issuer/mcp-vault-root/sign-intermediate" in str(c.args[0]), (
+                f"Path sign-intermediate incorrect : {c.args[0]}"
+            )
+            assert "issuer_ref" not in c.kwargs, "issuer_ref ne doit plus être dans le body"
+
+    def test_setup_fails_if_acme_header_tuning_fails(self):
+        """
+        ÉLEVÉ — si le tuning allowed_response_headers échoue, le setup doit
+        échouer (pas annoncer une PKI ACME opérationnelle qui ne l'est pas).
+        """
+        from mcp_vault.vault.pki_ca import setup_pki_ca
+
+        mock_client = self._mock_hvac()
+        mock_client.sys.tune_mount_configuration = MagicMock(
+            side_effect=Exception("tune refused")
+        )
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=mock_client), \
+             patch("mcp_vault.s3_sync.upload_to_s3", new_callable=AsyncMock, return_value=True), \
+             patch("mcp_vault.vault.pki_ca._read_pem_url", new_callable=AsyncMock, return_value=_MOCK_CERT_PEM):
+            result = _run(setup_pki_ca(lab_mode=False, allowed_domains=["prod.example.com"]))
+
+        assert result["status"] == "error", "Setup doit échouer si tuning ACME KO"
+
+    def test_rotate_uses_issuer_path(self):
+        """
+        Réserve #2 (rotation) — rotate_intermediate signe via
+        /issuer/:ref/sign-intermediate, pas issuer_ref dans le body.
+        """
+        from mcp_vault.vault.pki_ca import rotate_intermediate
+
+        mock_client = self._mock_hvac()
+        mock_client.write = MagicMock(return_value={
+            "data": {
+                "certificate": "",
+                "csr": "-----BEGIN CERTIFICATE REQUEST-----\nMOCK\n-----END CERTIFICATE REQUEST-----",
+                "imported_issuers": ["issuer-uuid-new"],
+                "default": "issuer-uuid-old",
+            }
+        })
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=mock_client), \
+             patch("mcp_vault.s3_sync.upload_to_s3", new_callable=AsyncMock, return_value=True), \
+             patch("mcp_vault.vault.pki_ca.is_pki_initialized", return_value=True), \
+             patch("mcp_vault.vault.pki_ca._read_pem_url", new_callable=AsyncMock, return_value=_MOCK_CERT_PEM):
+            result = _run(rotate_intermediate(keep_old_issuer=True))
+
+        assert result["status"] == "ok", f"Rotation KO : {result}"
+        sign_calls = [
+            c for c in mock_client.write.call_args_list
+            if c.args and "sign-intermediate" in str(c.args[0])
+        ]
+        assert sign_calls, "Aucun appel sign-intermediate dans la rotation"
+        for c in sign_calls:
+            assert "/issuer/mcp-vault-root/sign-intermediate" in str(c.args[0]), (
+                f"Path rotation incorrect : {c.args[0]}"
+            )
+            assert "issuer_ref" not in c.kwargs, "issuer_ref ne doit plus être dans le body (rotation)"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Mock certificat PEM pour les tests (auto-signé, expiré acceptable)
 # ─────────────────────────────────────────────────────────────────────────────
 
