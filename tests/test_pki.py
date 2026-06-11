@@ -421,6 +421,72 @@ class TestS3SyncAfterMutations:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Tests inventaire vide — hvac list() retourne None (issue #38)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestEmptyInventoryNoneSafe:
+    """
+    Issue #38 : client.list() retourne None sur un chemin vide (PKI/SSH vierge,
+    état nominal). Les fonctions de listing doivent retourner ok/total=0, pas
+    une AttributeError affichée comme erreur.
+    """
+
+    def test_safe_list_keys_helper(self):
+        """_hvac_utils.safe_list_keys gère None, dict vide, et structure valide."""
+        from mcp_vault.vault._hvac_utils import safe_list_keys
+        assert safe_list_keys(None) == []
+        assert safe_list_keys({}) == []
+        assert safe_list_keys({"data": None}) == []
+        assert safe_list_keys({"data": {}}) == []
+        assert safe_list_keys({"data": {"keys": None}}) == []
+        assert safe_list_keys({"data": {"keys": ["a", "b"]}}) == ["a", "b"]
+
+    def test_list_certs_empty_pki_returns_ok(self):
+        """
+        list_issued_certs sur PKI vierge (client.list → None) → ok/total=0,
+        PAS d'AttributeError. C'est le bug prod #38.
+        """
+        from mcp_vault.vault.pki_ca import list_issued_certs
+
+        client = MagicMock()
+        client.list = MagicMock(return_value=None)  # PKI vierge
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=client), \
+             patch("mcp_vault.vault.pki_ca.is_pki_initialized", return_value=True):
+            result = _run(list_issued_certs())
+
+        assert result["status"] == "ok", f"PKI vierge doit être ok : {result}"
+        assert result.get("total") == 0
+        assert result.get("certs") == []
+
+    def test_list_roles_empty_pki_returns_ok(self):
+        """list_pki_roles sur PKI sans rôle (client.list → None) → ok/count=0."""
+        from mcp_vault.vault.pki_ca import list_pki_roles
+
+        client = MagicMock()
+        client.list = MagicMock(return_value=None)
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=client), \
+             patch("mcp_vault.vault.pki_ca.is_pki_initialized", return_value=True):
+            result = _run(list_pki_roles())
+
+        assert result["status"] == "ok", f"Doit être ok : {result}"
+        assert result.get("count") == 0
+        assert result.get("roles") == []
+
+    def test_list_ssh_roles_empty_returns_ok(self):
+        """list_ssh_roles sur vault SSH vierge (client.list → None) → ok/count=0."""
+        from mcp_vault.vault import ssh_ca
+
+        client = MagicMock()
+        client.list = MagicMock(return_value=None)
+        with patch("mcp_vault.vault.ssh_ca.get_hvac_client", return_value=client):
+            result = _run(ssh_ca.list_ssh_roles("mon-vault"))
+
+        assert result["status"] == "ok", f"Vault SSH vierge doit être ok : {result}"
+        assert result.get("count") == 0
+        assert result.get("roles") == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Tests EAB policy — bug bloquant prod (issue #32)
 # ─────────────────────────────────────────────────────────────────────────────
 

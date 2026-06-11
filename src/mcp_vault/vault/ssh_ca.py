@@ -12,6 +12,7 @@ import re
 from typing import Optional
 
 from ..openbao.manager import get_hvac_client
+from ._hvac_utils import safe_list_keys
 
 logger = logging.getLogger("mcp-vault.ssh-ca")
 
@@ -182,7 +183,7 @@ async def list_ssh_roles(vault_id: str) -> dict:
 
     try:
         response = client.list(f"{mount_point}/roles")
-        roles = response.get("data", {}).get("keys", [])
+        roles = safe_list_keys(response)  # None si aucun rôle (issue #38)
 
         logger.info(f"📋 Rôles SSH listés pour {vault_id}: {roles}")
         return {

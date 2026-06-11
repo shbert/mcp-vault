@@ -1,5 +1,25 @@
 # Changelog — MCP Vault
 
+## [0.6.4] — 2026-06-11
+
+### Fixes PKI prod — distribution CA/CRL + inventaire vide (issues #37, #38)
+
+Deux correctifs bloquants/trompeurs détectés lors de l'audit prod v0.6.2 (suite #32).
+
+#### #37 — WAF bloquait la distribution CA/CRL (BLOQUANT)
+- `waf/coraza.conf` : la règle d'exclusion `10005` ne retirait pas la règle CRS **920440** (« URL file extension is restricted »), qui bloque l'extension `.pem`. Résultat : `/pki/ca/root.pem`, `/chain.pem`, `/crl.pem` répondaient **403** à travers le WAF (l'app les servait pourtant en 200).
+- Correctif : ajout de `ctl:ruleRemoveById=920440`, **restreint aux 3 fichiers** `^/pki/ca/(root|chain|crl)\.pem$` (pas d'ouverture WAF sur d'autres paths).
+- Sans CA/chain téléchargeables ni CRL accessible, aucun client ne pouvait établir la confiance — la distribution PKI n'avait jamais fonctionné via le WAF.
+
+#### #38 — Inventaire PKI/SSH vide affiché comme erreur
+- `hvac client.list()` retourne `None` sur un chemin vide (PKI/SSH fraîchement initialisée — état nominal) → `AttributeError: 'NoneType' object has no attribute 'get'`, affichée en bandeau rouge dans `/admin`.
+- Helper commun `vault/_hvac_utils.py::safe_list_keys()` appliqué à 3 call-sites : `list_issued_certs`, `list_pki_roles` (pki_ca.py), `list_ssh_roles` (ssh_ca.py).
+- Une PKI/SSH vierge retourne désormais `ok` / `total=0`.
+
+#### Tests
+- `tests/test_pki.py::TestEmptyInventoryNoneSafe` : helper + PKI vierge + rôles PKI/SSH vierges → `ok`, pas d'erreur.
+- À valider en Docker (#37) : `curl http://waf:8085/pki/ca/root.pem` → 200 (test d'intégration à travers le WAF).
+
 ## [0.6.3] — 2026-06-11
 
 ### Synchronisation des surfaces — affichage EAB + JIT broker au CLI (issue #34)

@@ -23,6 +23,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 
 from ..config import get_settings
+from ._hvac_utils import safe_list_keys
 
 logger = logging.getLogger("mcp-vault.pki-ca")
 
@@ -455,7 +456,7 @@ async def list_pki_roles() -> dict:
 
     try:
         response = client.list(f"{_INT_MOUNT}/roles")
-        roles = response.get("data", {}).get("keys", [])
+        roles = safe_list_keys(response)  # None si aucun rôle (issue #38)
         return {"status": "ok", "roles": roles, "count": len(roles)}
     except Exception as e:
         msg = str(e).lower()
@@ -512,7 +513,7 @@ async def list_issued_certs(limit: int = 100, offset: int = 0) -> dict:
 
     try:
         certs_resp = client.list(f"{_INT_MOUNT}/certs")
-        all_serials = certs_resp.get("data", {}).get("keys", [])
+        all_serials = safe_list_keys(certs_resp)  # None si aucun cert émis (issue #38)
         total = len(all_serials)
         page_serials = all_serials[offset:offset + limit]
 
