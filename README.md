@@ -374,7 +374,7 @@ docker compose exec mcp-vault python tests/test_e2e.py --test enforcement
 
 | Catégorie              | Tests  | Description                                                                        |
 | ---------------------- | ------ | ---------------------------------------------------------------------------------- |
-| Système                | 7      | health, about, services, tools_count (24)                                          |
+| Système                | 7      | health, about, services, tools_count (32)                                          |
 | Vault CRUD             | 28     | create + métadonnées, list, info + owner, update, delete, confirm, erreurs         |
 | Secrets CRUD           | 24     | 10 types écrits, read/list/delete, validation                                      |
 | Versioning             | 8      | v1→v2→v3, read latest, read spécifique                                             |
@@ -403,8 +403,8 @@ mcp-vault/
 ├── requirements.lock         # Dépendances pinnées (versions exactes)
 ├── VERSION                   # 0.6.1
 ├── DESIGN/mcp-vault/
-│   ├── ARCHITECTURE.md       # Spécification détaillée (v0.2.2-draft)
-│   ├── TECHNICAL.md          # Documentation technique (v0.4.16)
+│   ├── ARCHITECTURE.md       # Spécification détaillée (v0.6.1)
+│   ├── TECHNICAL.md          # Documentation technique (v0.6.1)
 │   └── SECURITY_AUDIT.md     # Rapport d'audit consolidé (60 findings V2.1)
 ├── scripts/
 │   ├── mcp_cli.py            # CLI entry point
@@ -417,7 +417,7 @@ mcp-vault/
 │       └── shell.py          # Shell interactif
 ├── src/mcp_vault/
 │   ├── config.py             # Configuration pydantic-settings
-│   ├── server.py             # FastMCP + 24 outils MCP + lifecycle + audit
+│   ├── server.py             # FastMCP + 32 outils MCP + lifecycle + audit
 │   ├── lifecycle.py          # Orchestrateur startup/shutdown
 │   ├── s3_client.py          # Client S3 hybride SigV2/SigV4
 │   ├── s3_sync.py            # Sync file backend ↔ S3
