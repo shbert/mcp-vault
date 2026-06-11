@@ -531,6 +531,112 @@ class TestSecretConsumeEndToEnd:
             object.__setattr__(settings, 'enforce_mission_token_validation', original_enforce)
             object.__setattr__(settings, 'mission_jwks_url', original_jwks)
 
+    def test_singleton_used_not_reinstantiated(self):
+        """
+        P0 — Le singleton MissionTokenValidator est réutilisé entre appels.
+        Non-complaisant : si secret_consume réinstanciait le validator, le mock
+        posé sur l'instance singleton ne serait jamais appelé.
+        """
+        from unittest.mock import MagicMock, patch, AsyncMock
+        import mcp_vault.auth.jwt_validator as jv
+
+        mock_validator = MagicMock()
+        mock_validator.validate.return_value = {
+            "mission_id": "m-singleton", "aud": "mcp-vault:test",
+            "tenant_id": "", "iss": "mcp-mission", "exp": 9999999999,
+        }
+        mock_consume = AsyncMock(return_value={"status": "ok", "data": {}})
+
+        from mcp_vault.server import settings
+        orig_jwks = settings.mission_jwks_url
+        try:
+            object.__setattr__(settings, "mission_jwks_url", "http://mock/.well-known/jwks.json")
+            with patch.object(jv, "_validator", mock_validator), \
+                 patch("mcp_vault.vault.wrapping.consume_wrap_secret", new_callable=AsyncMock,
+                        return_value={"status": "ok"}):
+                from mcp_vault.server import secret_consume
+                _run(secret_consume(wrap_token="wt1", operation_id="op-1", mission_token="t1"))
+                _run(secret_consume(wrap_token="wt2", operation_id="op-2", mission_token="t2"))
+        finally:
+            object.__setattr__(settings, "mission_jwks_url", orig_jwks)
+
+        # Le singleton doit avoir été appelé 2 fois (pas réinstancié)
+        assert mock_validator.validate.call_count == 2, (
+            f"Attendu 2 appels au singleton, obtenu {mock_validator.validate.call_count}"
+            " — le validator a probablement été réinstancié à chaque appel !"
+        )
+
+    def test_secret_wrap_enforce_true_auto_enriches_expected_aud(self):
+        """
+        ÉLEVÉ — En mode ENFORCE=true+JWKS, secret_wrap impose expected_aud automatiquement.
+        Non-complaisant : si expected_aud reste vide, le binding C18 est inactif en prod.
+        """
+        from mcp_vault.server import settings
+        from unittest.mock import AsyncMock, patch
+
+        orig_enforce = settings.enforce_mission_token_validation
+        orig_jwks = settings.mission_jwks_url
+        orig_aud = settings.mission_token_aud
+        try:
+            object.__setattr__(settings, "enforce_mission_token_validation", True)
+            object.__setattr__(settings, "mission_jwks_url", "http://mock/.well-known/jwks.json")
+            object.__setattr__(settings, "mission_token_aud", "mcp-vault:prod")
+
+            captured_calls = []
+
+            async def mock_wrap(vault_id, secret_path, mission_id, operation_id,
+                                ttl_seconds=300, tenant_id="", expected_aud=""):
+                captured_calls.append({"expected_aud": expected_aud})
+                return {"status": "ok", "wrap_token": "wt", "accessor": "ACC",
+                        "secret_id": "s", "expires_at": "2026-01-01", "vault_url": "",
+                        "intended_use": "password"}
+
+            with patch("mcp_vault.vault.wrapping.wrap_secret", side_effect=mock_wrap), \
+                 patch("mcp_vault.auth.context.check_admin_permission", return_value=None), \
+                 patch("mcp_vault.auth.context.check_access", return_value=None), \
+                 patch("mcp_vault.auth.context.check_path_policy", return_value=None):
+                from mcp_vault.server import secret_wrap
+                _run(secret_wrap(
+                    vault_id="prod", secret_path="db/pass",
+                    mission_id="m-1", operation_id="op-1",
+                    # expected_aud NON fourni → doit être auto-enrichi
+                ))
+        finally:
+            object.__setattr__(settings, "enforce_mission_token_validation", orig_enforce)
+            object.__setattr__(settings, "mission_jwks_url", orig_jwks)
+            object.__setattr__(settings, "mission_token_aud", orig_aud)
+
+        assert len(captured_calls) == 1, "wrap_secret non appelé"
+        assert captured_calls[0]["expected_aud"] == "mcp-vault:prod", (
+            f"expected_aud non enrichi en mode ENFORCE=true: {captured_calls[0]}"
+        )
+
+    def test_singleton_absent_enforce_true_returns_misconfigured(self):
+        """
+        ÉLEVÉ — Si singleton None + ENFORCE=true → misconfigured (pas de fallback éphémère).
+        Non-complaisant : si le fallback réinstanciait un validator, le cache serait perdu
+        et le rate-limit non global — exactement le bug P0 qu'on corrige.
+        """
+        import mcp_vault.auth.jwt_validator as jv
+        from mcp_vault.server import settings
+
+        orig_enforce = settings.enforce_mission_token_validation
+        orig_jwks = settings.mission_jwks_url
+        try:
+            object.__setattr__(settings, "enforce_mission_token_validation", True)
+            object.__setattr__(settings, "mission_jwks_url", "http://mock/.well-known/jwks.json")
+            with patch.object(jv, "_validator", None):  # singleton absent
+                from mcp_vault.server import secret_consume
+                result = _run(secret_consume(
+                    wrap_token="wt", operation_id="op-1", mission_token="dummy"
+                ))
+        finally:
+            object.__setattr__(settings, "enforce_mission_token_validation", orig_enforce)
+            object.__setattr__(settings, "mission_jwks_url", orig_jwks)
+
+        assert result["status"] == "error", f"Attendu error, obtenu: {result}"
+        assert result["error_type"] == "misconfigured", f"Attendu misconfigured: {result}"
+
     def test_wrap_token_never_in_audit_result(self):
         """wrap_token et mission_token ne doivent JAMAIS apparaître dans l'audit."""
         import asyncio

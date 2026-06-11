@@ -220,3 +220,41 @@ class MissionTokenValidator:
             raise MissionTokenError("validation_failed")
 
         return claims
+
+
+# ── Singleton process-wide (P0 — issue #29) ────────────────────────────────────
+# Un seul validateur partagé pour tout le processus : le cache JWKS (TTL 60s)
+# et le rate-limit (3 refreshes/min) sont ainsi effectivement globaux.
+_validator: Optional["MissionTokenValidator"] = None
+
+
+def init_mission_token_validator(
+    jwks_url: str,
+    expected_aud: str = "",
+    cache_ttl: int = 60,
+    max_refresh_per_min: int = 3,
+    leeway_seconds: int = 10,
+) -> Optional["MissionTokenValidator"]:
+    """
+    Initialise le validateur singleton process-wide.
+    Appelé une fois au startup depuis lifecycle.py.
+    Retourne None si jwks_url est vide (mode standalone sans mcp-mission).
+    """
+    global _validator
+    if not jwks_url:
+        _validator = None
+        return None
+    _validator = MissionTokenValidator(
+        jwks_url=jwks_url,
+        expected_aud=expected_aud,
+        cache_ttl=cache_ttl,
+        max_refresh_per_min=max_refresh_per_min,
+        leeway_seconds=leeway_seconds,
+    )
+    logger.info("MissionTokenValidator singleton initialisé (jwks=%s)", jwks_url)
+    return _validator
+
+
+def get_mission_token_validator() -> Optional["MissionTokenValidator"]:
+    """Retourne le singleton process-wide, ou None si non configuré."""
+    return _validator

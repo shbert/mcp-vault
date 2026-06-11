@@ -144,13 +144,15 @@ CA souveraine pour l'écosystème : les WAF Caddy s'enrôlent via ACME exactemen
 >
 > **`PKI_BASE_URL`** (optionnel) : URL de base pour les CDPs et le cluster path OpenBao ACME. Vide = déduit de `MCP_ALLOWED_HOSTS`. Override test Docker : `http://mcp-vault:8030`. Doit être `http(s)://`.
 
-### Consommation médiée — JWT mission_token (1) *(v0.6.0)*
+### Consommation médiée — JWT mission_token (2) *(v0.6.x)*
 
 | Outil | Perm | Description |
 | --- | --- | --- |
-| `secret_consume(wrap_token, operation_id, mission_token)` | admin | Valide JWT ES256/JWKS, vérifie binding mission, unwrap OpenBao (C18) |
+| `secret_wrap(vault_id, secret_path, mission_id, operation_id, ttl_seconds?, tenant_id?, expected_aud?)` | admin | Crée un wrap token single-use (write-ahead registry) |
+| `secret_consume(wrap_token, operation_id, mission_token)` | admin | Valide JWT ES256/JWKS, vérifie binding complet (mission_id, tenant_id, aud), unwrap OpenBao (C18) |
 
 > Activer avec `ENFORCE_MISSION_TOKEN_VALIDATION=true`. Par défaut (false) : log warning, continue — zéro impact standalone sans mcp-mission.
+> `tenant_id` et `expected_aud` dans `secret_wrap` alimentent le binding C18 complet côté `secret_consume` *(v0.6.1)*.
 
 ### Audit (1)
 
@@ -336,7 +338,7 @@ Les clés unseal d'OpenBao sont protégées par **séparation physique à 3 fact
 
 | Version              | Approche                                                                                                            |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **v0.6.0** (actuel)  | Clés sur S3 chiffrées AES-256-GCM+AAD, mémoire seule au runtime — 60 findings audités (28 corrigés, 13 résiduels documentés) |
+| **v0.6.1** (actuel)  | Clés sur S3 chiffrées AES-256-GCM+AAD, mémoire seule au runtime — hardening C18 : singleton JWT + binding complet tenant_id/aud |
 | **v1.0**             | Transit Auto-Unseal via OpenBao dédié (KMS Cloud Temple)                                                            |
 | **v2.0**             | **Connexion HSM** (Hardware Security Module) Cloud Temple — les clés ne quittent jamais le module matériel certifié |
 
@@ -399,7 +401,7 @@ mcp-vault/
 ├── Dockerfile                # Multi-stage (OpenBao 2.5.1 + Python 3.12)
 ├── requirements.txt          # Dépendances Python
 ├── requirements.lock         # Dépendances pinnées (versions exactes)
-├── VERSION                   # 0.6.0
+├── VERSION                   # 0.6.1
 ├── DESIGN/mcp-vault/
 │   ├── ARCHITECTURE.md       # Spécification détaillée (v0.2.2-draft)
 │   ├── TECHNICAL.md          # Documentation technique (v0.4.16)
@@ -459,4 +461,4 @@ mcp-vault/
 
 ---
 
-**Licence** : Apache 2.0 | **Auteur** : Cloud Temple | **Version** : 0.6.0
+**Licence** : Apache 2.0 | **Auteur** : Cloud Temple | **Version** : 0.6.1

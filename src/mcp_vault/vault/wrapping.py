@@ -401,6 +401,8 @@ async def wrap_secret(
     mission_id: str,
     operation_id: str,
     ttl_seconds: int = 300,
+    tenant_id: str = "",
+    expected_aud: str = "",
 ) -> dict:
     """
     Crée un wrap token single-use pour (vault_id, secret_path) scopé à la mission.
@@ -436,7 +438,8 @@ async def wrap_secret(
     if registry is None:
         return {"status": "error", "error_type": "registry_unavailable",
                 "message": "Registre de compensation non configuré (S3 requis)"}
-    if not registry.register_pending(operation_id, mission_id, vault_id, secret_path, ttl_seconds):
+    if not registry.register_pending(operation_id, mission_id, vault_id, secret_path, ttl_seconds,
+                                     tenant_id=tenant_id, expected_aud=expected_aud):
         # S3 indisponible → compensation impossible → refuser le wrap
         return {"status": "error", "error_type": "registry_unavailable",
                 "message": "Registre de compensation indisponible — wrap refusé pour intégrité"}
@@ -668,15 +671,19 @@ async def consume_wrap_secret(
     wrap_token: str,
     operation_id: str,
     mission_id: str,
+    tenant_id: str = "",
+    expected_aud: str = "",
+    enforce: bool = False,
 ) -> dict:
     """
-    Libère un secret via le wrap_token après vérification du binding mission.
+    Libère un secret via le wrap_token après vérification du binding mission complet.
 
     Appelé depuis server.secret_consume APRÈS validation du JWT mission_token.
     La validation JWT (ES256/JWKS, iss/aud/exp) est faite en amont par le serveur.
 
     Flux :
     1. Lookup registry par (operation_id, mission_id) — clé composite
+    1b. Vérification binding C18 complet : tenant_id + expected_aud (P1 — issue #29)
     2. try_mark_consuming() — atomic best-effort (backstop : OpenBao single-use)
     3. Unwrap OpenBao cubbyhole avec wrap_token
     4. mark_consumed() — anti-replay
@@ -684,6 +691,7 @@ async def consume_wrap_secret(
 
     Sécurité :
     - wrap_token jamais loggué (paramètre SENSIBLE)
+    - Binding mismatch détecté AVANT try_mark_consuming (pas d'état orphelin)
     - En cas d'échec OpenBao, rollback_consuming() pour permettre un retry
     - mission_id dans tous les logs (non-sensible, corrélation)
     """
@@ -713,6 +721,32 @@ async def consume_wrap_secret(
                     "message": "Ce wrap a déjà été consommé"}
         return {"status": "error", "error_type": "not_found",
                 "message": "Wrap introuvable (opération inconnue ou expirée)"}
+
+    # ── 1b. Vérification binding C18 complet (P1 — issue #29) ───────
+    # Vérification AVANT try_mark_consuming : pas d'état "consuming" orphelin si mismatch.
+    # tenant_id et expected_aud sont optionnels (rétrocompat wraps legacy).
+    # En mode enforce=True : les wraps sans expected_aud sont refusés (binding incomplet).
+    if entry.get("tenant_id") and tenant_id != entry["tenant_id"]:
+        logger.warning(
+            "⚠️ consume_wrap_secret : binding mismatch (tenant_id) op=%s — confused-deputy rejeté",
+            operation_id[:16],
+        )
+        return {"status": "error", "error_type": "binding_mismatch",
+                "message": "binding mismatch"}
+    if entry.get("expected_aud") and expected_aud != entry["expected_aud"]:
+        logger.warning(
+            "⚠️ consume_wrap_secret : binding mismatch (aud) op=%s — confused-deputy rejeté",
+            operation_id[:16],
+        )
+        return {"status": "error", "error_type": "binding_mismatch",
+                "message": "binding mismatch"}
+    if enforce and not entry.get("expected_aud"):
+        logger.warning(
+            "⚠️ consume_wrap_secret : wrap sans expected_aud en mode enforced op=%s — rejeté",
+            operation_id[:16],
+        )
+        return {"status": "error", "error_type": "binding_incomplete",
+                "message": "binding incomplet (expected_aud manquant)"}
 
     # ── 2. Atomic try_mark_consuming ────────────────────────────────
     if not registry.try_mark_consuming(operation_id, mission_id):

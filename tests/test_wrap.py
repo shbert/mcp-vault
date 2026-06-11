@@ -536,6 +536,276 @@ def test_server_lookup_validates_operation_id():
 
 
 # =============================================================================
+# TEST 16 — consume_wrap_secret : binding C18 complet (P1 — issue #29)
+# =============================================================================
+
+def _make_entry_with_binding(op_id="op-1", mission_id="m-1",
+                              tenant_id="tenant-42", expected_aud="mcp-vault:prod"):
+    """Entrée active avec tenant_id et expected_aud définis."""
+    return {
+        "operation_id": op_id,
+        "accessor": "ACC-BIND",
+        "mission_id": mission_id,
+        "vault_id": "prod",
+        "secret_path": "db/pass",
+        "created_at": "", "expires_at": "",
+        "status": "active",
+        "tenant_id": tenant_id,
+        "expected_aud": expected_aud,
+    }
+
+
+def test_consume_binding_tenant_id_mismatch_rejected():
+    """
+    P1 — tenant_id JWT ≠ tenant_id registry → binding_mismatch, SANS unwrap OpenBao.
+    Non-complaisant : si la vérification manquait, OpenBao serait appelé malgré le mismatch.
+    """
+    from mcp_vault.vault.wrapping import consume_wrap_secret
+
+    reg = _make_registry()
+    reg._wraps = [_make_entry_with_binding(tenant_id="tenant-LEGITIME")]
+
+    hvac_client = MagicMock()
+    cfg = MagicMock(); cfg.openbao_addr = "http://127.0.0.1:8200"
+
+    with patch("mcp_vault.vault.wrapping._get_client", return_value=hvac_client), \
+         patch("mcp_vault.vault.wrapping._get_config", return_value=cfg), \
+         patch("mcp_vault.vault.wrapping.get_wrap_registry", return_value=reg):
+        result = run(consume_wrap_secret(
+            wrap_token="wt-secret",
+            operation_id="op-1",
+            mission_id="m-1",
+            tenant_id="tenant-ATTAQUANT",   # mismatch intentionnel
+            expected_aud="mcp-vault:prod",
+        ))
+
+    assert result["status"] == "error", f"Attendu error, obtenu: {result}"
+    assert result["error_type"] == "binding_mismatch", f"Attendu binding_mismatch: {result}"
+    assert result["message"] == "binding mismatch", f"Message doit être générique: {result}"
+    # Non-complaisant : OpenBao NE doit pas avoir été appelé
+    hvac_client.sys.unwrap.assert_not_called()
+    print("  ✅ TEST 16a — tenant_id mismatch rejeté, OpenBao non appelé")
+
+
+def test_consume_binding_expected_aud_mismatch_rejected():
+    """
+    P1 — expected_aud JWT ≠ expected_aud registry → binding_mismatch, SANS unwrap OpenBao.
+    Non-complaisant : si la vérification manquait, un token d'un autre vault passerait.
+    """
+    from mcp_vault.vault.wrapping import consume_wrap_secret
+
+    reg = _make_registry()
+    reg._wraps = [_make_entry_with_binding(expected_aud="mcp-vault:prod-LEGITIME")]
+
+    hvac_client = MagicMock()
+    cfg = MagicMock(); cfg.openbao_addr = "http://127.0.0.1:8200"
+
+    with patch("mcp_vault.vault.wrapping._get_client", return_value=hvac_client), \
+         patch("mcp_vault.vault.wrapping._get_config", return_value=cfg), \
+         patch("mcp_vault.vault.wrapping.get_wrap_registry", return_value=reg):
+        result = run(consume_wrap_secret(
+            wrap_token="wt-secret",
+            operation_id="op-1",
+            mission_id="m-1",
+            tenant_id="tenant-42",
+            expected_aud="mcp-vault:AUTRE-INSTANCE",   # confused-deputy
+        ))
+
+    assert result["status"] == "error", f"Attendu error, obtenu: {result}"
+    assert result["error_type"] == "binding_mismatch", f"Attendu binding_mismatch: {result}"
+    assert result["message"] == "binding mismatch", f"Message doit être générique: {result}"
+    hvac_client.sys.unwrap.assert_not_called()
+    print("  ✅ TEST 16b — expected_aud mismatch rejeté (confused-deputy bloqué)")
+
+
+def test_consume_binding_mismatch_no_consuming_state_created():
+    """
+    P1 — Vérification que le mismatch est détecté AVANT try_mark_consuming.
+    Non-complaisant : un état "consuming" orphelin serait créé si la vérification
+    arrivait APRÈS la mutation S3.
+    """
+    from mcp_vault.vault.wrapping import consume_wrap_secret
+
+    reg = _make_registry()
+    reg._wraps = [_make_entry_with_binding(tenant_id="tenant-LEGITIME")]
+
+    consuming_called = []
+    orig_try = reg.try_mark_consuming
+
+    def spy_try(op, mission):
+        consuming_called.append((op, mission))
+        return orig_try(op, mission)
+
+    reg.try_mark_consuming = spy_try
+    hvac_client = MagicMock()
+    cfg = MagicMock(); cfg.openbao_addr = "http://127.0.0.1:8200"
+
+    with patch("mcp_vault.vault.wrapping._get_client", return_value=hvac_client), \
+         patch("mcp_vault.vault.wrapping._get_config", return_value=cfg), \
+         patch("mcp_vault.vault.wrapping.get_wrap_registry", return_value=reg):
+        result = run(consume_wrap_secret(
+            wrap_token="wt",
+            operation_id="op-1",
+            mission_id="m-1",
+            tenant_id="tenant-MAUVAIS",
+        ))
+
+    assert result["error_type"] == "binding_mismatch"
+    assert len(consuming_called) == 0, (
+        f"try_mark_consuming appelé malgré binding_mismatch ! Appels: {consuming_called}"
+    )
+    print("  ✅ TEST 16c — mismatch détecté avant try_mark_consuming (pas d'état orphelin)")
+
+
+def test_consume_binding_correct_succeeds():
+    """
+    P1 — Binding correct (tenant_id + expected_aud) → consume réussit normalement.
+    Non-complaisant : vérifier que les guards ne bloquent pas le cas nominal.
+    """
+    import sys
+    from mcp_vault.vault.wrapping import consume_wrap_secret
+
+    reg = _make_registry()
+    reg._wraps = [_make_entry_with_binding(
+        tenant_id="tenant-42", expected_aud="mcp-vault:prod"
+    )]
+
+    # consume_wrap_secret crée un client hvac éphémère — mocker le module
+    mock_hvac = MagicMock()
+    mock_ephemeral = MagicMock()
+    mock_hvac.Client.return_value = mock_ephemeral
+    mock_ephemeral.sys.unwrap.return_value = {"data": {"password": "s3cr3t"}}
+    cfg = MagicMock(); cfg.openbao_addr = "http://127.0.0.1:8200"
+
+    with patch.dict(sys.modules, {"hvac": mock_hvac}), \
+         patch("mcp_vault.vault.wrapping._get_client", return_value=MagicMock()), \
+         patch("mcp_vault.vault.wrapping._get_config", return_value=cfg), \
+         patch("mcp_vault.vault.wrapping.get_wrap_registry", return_value=reg):
+        result = run(consume_wrap_secret(
+            wrap_token="wt-secret",
+            operation_id="op-1",
+            mission_id="m-1",
+            tenant_id="tenant-42",
+            expected_aud="mcp-vault:prod",
+        ))
+
+    assert result["status"] == "ok", f"Binding correct mais consume échoué: {result}"
+    assert result["data"] == {"password": "s3cr3t"}
+    print("  ✅ TEST 16d — binding correct → consume réussit")
+
+
+def test_wrap_then_consume_binding_propagated():
+    """
+    CRITIQUE — tenant_id/expected_aud propagés de wrap_secret() à register_pending().
+    Non-complaisant : si les champs ne sont pas propagés, le binding est inactif en prod.
+    """
+    from mcp_vault.vault.wrapping import wrap_secret
+
+    registry = _make_registry()
+    client = _make_hvac_ok(wrap_token="s.TESTWRAP", accessor="ACCBIND")
+    cfg = MagicMock(); cfg.openbao_addr = "http://127.0.0.1:8200"
+
+    with patch("mcp_vault.vault.wrapping._get_client", return_value=client), \
+         patch("mcp_vault.vault.wrapping._get_config", return_value=cfg), \
+         patch("mcp_vault.vault.wrapping.get_wrap_registry", return_value=registry):
+        result = run(wrap_secret(
+            "prod", "db/pass", "m-1", "op-bind", 300,
+            tenant_id="tenant-42", expected_aud="mcp-vault:prod",
+        ))
+
+    assert result["status"] == "ok", f"wrap échoué: {result}"
+    entries = registry.find_by_operation_id("op-bind")
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["tenant_id"] == "tenant-42", (
+        f"tenant_id non propagé au registry: {entry}"
+    )
+    assert entry["expected_aud"] == "mcp-vault:prod", (
+        f"expected_aud non propagé au registry: {entry}"
+    )
+    print("  ✅ TEST 16f — tenant_id+expected_aud propagés de wrap_secret → registry")
+
+
+def test_consume_enforce_mode_rejects_wrap_without_expected_aud():
+    """
+    ÉLEVÉ — En mode enforce=True, un wrap legacy sans expected_aud est rejeté.
+    Non-complaisant : sans ce check, les wraps créés avant P1 seraient consommables
+    en mode enforced sans vérification aud, contournant le binding C18.
+    """
+    from mcp_vault.vault.wrapping import consume_wrap_secret
+
+    reg = _make_registry()
+    reg._wraps = [{
+        "operation_id": "op-1", "accessor": "ACC", "mission_id": "m-1",
+        "vault_id": "prod", "secret_path": "db/p",
+        "created_at": "", "expires_at": "", "status": "active",
+        "tenant_id": "",
+        "expected_aud": "",  # wrap legacy sans aud
+    }]
+
+    hvac_client = MagicMock()
+    cfg = MagicMock(); cfg.openbao_addr = "http://127.0.0.1:8200"
+
+    with patch("mcp_vault.vault.wrapping._get_client", return_value=hvac_client), \
+         patch("mcp_vault.vault.wrapping._get_config", return_value=cfg), \
+         patch("mcp_vault.vault.wrapping.get_wrap_registry", return_value=reg):
+        result = run(consume_wrap_secret(
+            wrap_token="wt",
+            operation_id="op-1",
+            mission_id="m-1",
+            tenant_id="",
+            expected_aud="",
+            enforce=True,   # mode enforced
+        ))
+
+    assert result["status"] == "error", f"Wrap legacy doit être rejeté en mode enforced: {result}"
+    assert result["error_type"] == "binding_incomplete", f"Attendu binding_incomplete: {result}"
+    hvac_client.sys.unwrap.assert_not_called()
+    print("  ✅ TEST 16g — wrap legacy sans expected_aud rejeté en mode enforced")
+
+
+def test_consume_binding_empty_registry_fields_ignored():
+    """
+    P1 — Si tenant_id/expected_aud vides dans le registry, pas de vérification binding.
+    Rétrocompatibilité : les wraps créés avant P1 n'ont pas ces champs → doivent passer.
+    """
+    import sys
+    from mcp_vault.vault.wrapping import consume_wrap_secret
+
+    reg = _make_registry()
+    reg._wraps = [{
+        "operation_id": "op-1", "accessor": "ACC", "mission_id": "m-1",
+        "vault_id": "prod", "secret_path": "db/p",
+        "created_at": "", "expires_at": "", "status": "active",
+        "tenant_id": "",       # vide → pas de vérification
+        "expected_aud": "",    # vide → pas de vérification
+    }]
+
+    mock_hvac = MagicMock()
+    mock_ephemeral = MagicMock()
+    mock_hvac.Client.return_value = mock_ephemeral
+    mock_ephemeral.sys.unwrap.return_value = {"data": {"key": "val"}}
+    cfg = MagicMock(); cfg.openbao_addr = "http://127.0.0.1:8200"
+
+    with patch.dict(sys.modules, {"hvac": mock_hvac}), \
+         patch("mcp_vault.vault.wrapping._get_client", return_value=MagicMock()), \
+         patch("mcp_vault.vault.wrapping._get_config", return_value=cfg), \
+         patch("mcp_vault.vault.wrapping.get_wrap_registry", return_value=reg):
+        result = run(consume_wrap_secret(
+            wrap_token="wt",
+            operation_id="op-1",
+            mission_id="m-1",
+            tenant_id="n'importe quoi",
+            expected_aud="n'importe quoi",
+        ))
+
+    assert result["status"] == "ok", (
+        f"Champs vides dans registry → consume doit réussir: {result}"
+    )
+    print("  ✅ TEST 16e — champs vides dans registry → binding ignoré (rétrocompat)")
+
+
+# =============================================================================
 # Runner
 # =============================================================================
 
@@ -556,6 +826,11 @@ if __name__ == "__main__":
         test_server_lookup_validates_operation_id,
         test_s3_failure_blocks_wrap,
         test_found_unattached_state,
+        test_consume_binding_tenant_id_mismatch_rejected,
+        test_consume_binding_expected_aud_mismatch_rejected,
+        test_consume_binding_mismatch_no_consuming_state_created,
+        test_consume_binding_correct_succeeds,
+        test_consume_binding_empty_registry_fields_ignored,
     ]
 
     print(f"\n🧪 Tests JIT Wrap Broker — issue #7 mcp-mission V1 ({len(tests)} tests)\n")
