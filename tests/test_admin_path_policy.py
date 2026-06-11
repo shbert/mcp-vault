@@ -19,6 +19,20 @@ os.environ.setdefault("ADMIN_BOOTSTRAP_KEY", "Test-Bootstrap-Key-2026-Pour-Tests
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 
+def _loop():
+    """Boucle d'événements valide même si une suite antérieure l'a fermée (issue #36)."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop
+
+
 def _make_scope(method: str, path: str, token: str = "admin-bootstrap-token") -> dict:
     """Construit un scope ASGI minimal."""
     return {
@@ -87,7 +101,7 @@ def test_admin_api_list_secrets_blocked_by_path_policy():
          patch("mcp_vault.admin.api.check_policy", return_value=None), \
          patch("mcp_vault.admin.api.check_path_policy", return_value=path_policy_err) as mock_cpp, \
          patch("mcp_vault.admin.api._check_vault_access", return_value=None):
-        status, body = asyncio.get_event_loop().run_until_complete(
+        status, body = _loop().run_until_complete(
             _call_admin_api(scope)
         )
 
@@ -110,7 +124,7 @@ def test_admin_api_read_secret_blocked_by_path_policy():
          patch("mcp_vault.admin.api.check_policy", return_value=None), \
          patch("mcp_vault.admin.api.check_path_policy", return_value=path_policy_err) as mock_cpp, \
          patch("mcp_vault.admin.api._check_vault_access", return_value=None):
-        status, body = asyncio.get_event_loop().run_until_complete(
+        status, body = _loop().run_until_complete(
             _call_admin_api(scope)
         )
 
@@ -134,7 +148,7 @@ def test_admin_api_write_secret_blocked_by_path_policy():
          patch("mcp_vault.admin.api.check_policy", return_value=None), \
          patch("mcp_vault.admin.api.check_path_policy", return_value=path_policy_err) as mock_cpp, \
          patch("mcp_vault.admin.api._check_vault_access", return_value=None):
-        status, resp = asyncio.get_event_loop().run_until_complete(
+        status, resp = _loop().run_until_complete(
             _call_admin_api(scope, body=body)
         )
 
@@ -157,7 +171,7 @@ def test_admin_api_delete_secret_blocked_by_path_policy():
          patch("mcp_vault.admin.api.check_policy", return_value=None), \
          patch("mcp_vault.admin.api.check_path_policy", return_value=path_policy_err) as mock_cpp, \
          patch("mcp_vault.admin.api._check_vault_access", return_value=None):
-        status, resp = asyncio.get_event_loop().run_until_complete(
+        status, resp = _loop().run_until_complete(
             _call_admin_api(scope)
         )
 
