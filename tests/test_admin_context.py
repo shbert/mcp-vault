@@ -27,6 +27,20 @@ os.environ.setdefault("MCP_SERVER_NAME", "mcp-vault-test")
 os.environ.setdefault("ADMIN_BOOTSTRAP_KEY", "Test-Bootstrap-Key-2026-Pour-Tests!!")
 
 
+def _loop():
+    """Boucle d'événements valide même si une suite antérieure l'a fermée (issue #36)."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop
+
+
 # =============================================================================
 # Tests ContextVar injection (fix du bug "created_by: anonymous")
 # =============================================================================
@@ -83,7 +97,7 @@ class TestAdminApiContextVar:
 
         with patch("mcp_vault.admin.api._get_token_info", return_value=token_info), \
              patch("mcp_vault.admin.api._json_response", side_effect=spy_json_response):
-            asyncio.get_event_loop().run_until_complete(
+            _loop().run_until_complete(
                 handle_admin_api(scope, receive, send_fn, mcp=None)
             )
 
@@ -127,7 +141,7 @@ class TestAdminApiContextVar:
 
         with patch("mcp_vault.admin.api._get_token_info", return_value=token_info), \
              patch("mcp_vault.admin.api._json_response", side_effect=spy_json_response):
-            asyncio.get_event_loop().run_until_complete(
+            _loop().run_until_complete(
                 handle_admin_api(scope, receive, send_fn, mcp=None)
             )
 
@@ -335,7 +349,7 @@ class TestAdminApiCodeStructure:
             events.append(event)
 
         with patch("mcp_vault.admin.api._get_token_info", return_value=token_info):
-            asyncio.get_event_loop().run_until_complete(
+            _loop().run_until_complete(
                 handle_admin_api(scope, receive, send, None)
             )
 

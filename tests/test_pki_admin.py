@@ -30,7 +30,21 @@ if "hvac" not in sys.modules:
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    """Run coroutine de façon défensive (issue #36).
+
+    Les suites CLI (CliRunner + asyncio.run) peuvent fermer la boucle globale.
+    On recrée une boucle si la courante est fermée ou absente, sans la fermer
+    nous-mêmes. Pattern identique à test_jwt_validator._run.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
 
 
 # ─── ASGI test helpers ────────────────────────────────────────────────────────
