@@ -1,5 +1,28 @@
 # Changelog — MCP Vault
 
+## [0.6.3] — 2026-06-11
+
+### Synchronisation des surfaces — affichage EAB + JIT broker au CLI (issue #34)
+
+Alignement des surfaces (SPA `/admin`, CLI Click, shell) sur le backend, suite à l'audit post-v0.6.2. Aucun changement de comportement serveur.
+
+#### SPA `/admin`
+- `pki.js` : le statut PKI affiche désormais l'état **EAB** (`eab_required` + `eab_policy`) dans une carte dédiée — un admin voit si l'enrôlement ACME est protégé (`esc()` appliqué, pas de régression XSS).
+
+#### CLI — affichage
+- `display.py` `show_pki_result()` : ajout de la ligne `eab_policy` (diagnostic `not-required` / `new-account-required`).
+
+#### CLI — JIT Wrap Broker exposé (Click + shell)
+- Nouvelles commandes `secret wrap`, `secret revoke-wrap`, `secret wrap-lookup` (contrat M2M mcp-mission), pour le debug, la révocation et les tests de contrat.
+- `secret wrap` supporte le binding C18 (`--tenant-id`, `--expected-aud`) en Click **et** en shell (parité).
+- `show_wrap_result()` : affiche le `wrap_token` avec alerte **SENSIBLE** et remonte toujours la `note` (ex. registry indisponible) en warning.
+- **Décision (Codex)** : le broker n'est **pas** exposé en SPA (surface XSS / fuite presse-papier sur les wrap tokens).
+
+#### Tests
+- Tests CLI non-complaisant (`tests/cli/test_secret.py`) : vérifient les appels MCP réels (`secret_wrap`/`revoke_wrap`/`wrap_lookup`), le binding C18 transmis, et l'alerte SENSIBLE.
+
+> **Note** : `secret_wrap`/`secret_revoke_wrap`/`secret_wrap_lookup` existaient depuis v0.4.13 (JIT broker, issue #7) mais n'étaient exposés sur aucune surface humaine. Couverture CLI désormais complète.
+
 ## [0.6.2] — 2026-06-11
 
 ### Fix PKI mode Prod — eab_policy invalide (issue #32)

@@ -17,6 +17,7 @@ from .display import (
     show_types_result, show_password_result,
     show_ssh_result, show_token_result,
     show_policy_result, show_audit_result, show_pki_result,
+    show_wrap_result,
 )
 
 
@@ -26,7 +27,7 @@ SHELL_COMMANDS = {
     "about":      "Informations sur le service",
     "whoami":     "Identité du token courant (nom, permissions, vaults)",
     "vault":      "vault <op> [args] — create, list, info, update, delete",
-    "secret":     "secret <op> <vault> [args] — write, read, list, delete, consume",
+    "secret":     "secret <op> <vault> [args] — write, read, list, delete, consume, wrap, revoke-wrap, wrap-lookup",
     "types":      "Lister les 14 types de secrets",
     "password":   "password [length] — Générer un mot de passe CSPRNG",
     "ssh":        "ssh <op> <vault> [args] — setup, sign, ca-key, roles, role-info",
@@ -128,7 +129,9 @@ async def cmd_vault(client, args="", json_output=False):
         show_vault_result(result)
 
 
-SECRET_OPS = ("write", "read", "list", "delete", "consume")
+SECRET_OPS = ("write", "read", "list", "delete", "consume",
+              "wrap", "revoke-wrap", "wrap-lookup")
+WRAP_OPS = ("wrap", "revoke-wrap", "wrap-lookup")
 
 
 async def cmd_secret(client, args="", json_output=False):
@@ -198,12 +201,43 @@ async def cmd_secret(client, args="", json_output=False):
             "operation_id": parts[1],
             "mission_token": mission_token_val,
         })
+    elif op == "wrap" and len(parts) >= 5:
+        # secret wrap <vault> <path> <mission_id> <operation_id> [ttl] [--tenant-id X] [--expected-aud Y]
+        ttl_val = 300
+        tenant_id_val = ""
+        expected_aud_val = ""
+        i = 5
+        while i < len(parts):
+            if parts[i] == "--tenant-id" and i + 1 < len(parts):
+                tenant_id_val = parts[i + 1]; i += 2
+            elif parts[i] == "--expected-aud" and i + 1 < len(parts):
+                expected_aud_val = parts[i + 1]; i += 2
+            elif parts[i].isdigit():
+                ttl_val = int(parts[i]); i += 1
+            else:
+                i += 1
+        result = await client.call_tool("secret_wrap", {
+            "vault_id": parts[1], "secret_path": parts[2],
+            "mission_id": parts[3], "operation_id": parts[4],
+            "ttl_seconds": ttl_val,
+            "tenant_id": tenant_id_val, "expected_aud": expected_aud_val,
+        })
+    elif op == "revoke-wrap" and len(parts) >= 2:
+        # secret revoke-wrap <lease_id>
+        result = await client.call_tool("secret_revoke_wrap", {"lease_id": parts[1]})
+    elif op == "wrap-lookup" and len(parts) >= 2:
+        # secret wrap-lookup <operation_id>
+        result = await client.call_tool("secret_wrap_lookup", {"operation_id": parts[1]})
     else:
         show_warning(f"Usage: secret {op} <vault> <path>")
+        if op == "wrap":
+            show_warning("  secret wrap <vault> <path> <mission_id> <operation_id> [ttl]")
         return
 
     if json_output:
         show_json(result)
+    elif op in WRAP_OPS:
+        show_wrap_result(result)
     else:
         show_secret_result(result)
 

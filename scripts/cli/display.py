@@ -601,6 +601,54 @@ def show_token_result(result: dict):
 # PKI Certificate Authority
 # =============================================================================
 
+def show_wrap_result(result: dict):
+    """Affichage des opérations JIT broker (wrap / revoke-wrap / wrap-lookup)."""
+    status = result.get("status", "?")
+    if status == "error":
+        show_error(result.get("message", "Erreur wrap broker"))
+        return
+
+    # --- WRAP : retourne un wrap_token SENSIBLE ---
+    if "wrap_token" in result:
+        show_success("Wrap token créé (single-use)")
+        table = Table(show_header=False)
+        table.add_column("Champ", style="cyan bold", min_width=20)
+        table.add_column("Valeur")
+        table.add_row("wrap_token ⚠️", f"[yellow]{result.get('wrap_token', '')}[/yellow]")
+        table.add_row("accessor",     result.get("accessor", "?"))
+        table.add_row("operation_id", result.get("operation_id", "?"))
+        table.add_row("mission_id",   result.get("mission_id", "?"))
+        table.add_row("expires_at",   result.get("expires_at", "?"))
+        if result.get("intended_use"):
+            table.add_row("intended_use", result.get("intended_use"))
+        console.print(table)
+        console.print("[dim]⚠️  wrap_token SENSIBLE — single-use, ne pas logguer.[/dim]")
+        return
+
+    # --- REVOKE / LOOKUP : retourne un state ---
+    state = result.get("state")
+    if state is not None:
+        show_success(f"État : [cyan]{state}[/cyan]")
+        if "count_revoked" in result or "entries_found" in result:
+            table = Table(show_header=False)
+            table.add_column("Champ", style="cyan bold", min_width=20)
+            table.add_column("Valeur")
+            if "entries_found" in result:
+                table.add_row("entries_found", str(result.get("entries_found")))
+            if "count_revoked" in result:
+                table.add_row("count_revoked", str(result.get("count_revoked")))
+            console.print(table)
+        # Toujours remonter la note (ex : "registry indisponible — révocation
+        # impossible") même sur un state ok/not_found — sinon l'opérateur croit
+        # à un succès complet.
+        if result.get("note"):
+            show_warning(result.get("note"))
+        return
+
+    # Fallback
+    show_json(result)
+
+
 def show_pki_result(result: dict):
     """Affichage adaptatif selon le type de réponse PKI."""
     status = result.get("status", "?")
@@ -625,6 +673,8 @@ def show_pki_result(result: dict):
         table.add_row("Domaines ACME",   ", ".join(result.get("allowed_domains", [])))
         table.add_row("TTL feuille",     result.get("leaf_ttl", "?"))
         table.add_row("EAB requis",      str(result.get("eab_required", False)))
+        if result.get("eab_policy"):
+            table.add_row("EAB policy",   result.get("eab_policy"))
         if result.get("s3_sync_ok") is False:
             table.add_row("[red]S3 sync[/red]", "[red]ÉCHEC — durabilité compromise[/red]")
         console.print(table)
