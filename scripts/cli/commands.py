@@ -21,6 +21,7 @@ from .display import (
     show_types_result, show_password_result,
     show_ssh_result, show_token_result,
     show_policy_result, show_audit_result, show_pki_result,
+    show_wrap_result,
 )
 
 
@@ -423,6 +424,88 @@ def secret_consume_cmd(ctx, operation_id, wrap_token, mission_token, output_json
             show_json(result)
         else:
             show_secret_result(result)
+    asyncio.run(_run())
+
+
+@secret_group.command("wrap")
+@click.argument("vault_id")
+@click.argument("secret_path")
+@click.option("--mission-id", "mission_id", required=True, help="Identifiant de mission (scope)")
+@click.option("--operation-id", "operation_id", required=True, help="Corrélation write-ahead (compensation)")
+@click.option("--ttl", "ttl_seconds", type=int, default=300, help="TTL du wrap token en secondes (60-3600)")
+@click.option("--tenant-id", "tenant_id", default="", help="Binding C18 — tenant_id attendu (optionnel)")
+@click.option("--expected-aud", "expected_aud", default="", help="Binding C18 — audience attendue (optionnel)")
+@click.option("--json", "-j", "output_json", is_flag=True, help="Sortie JSON brute")
+@click.pass_context
+def secret_wrap_cmd(ctx, vault_id, secret_path, mission_id, operation_id,
+                    ttl_seconds, tenant_id, expected_aud, output_json):
+    """Créer un wrap token single-use pour un secret (contrat JIT broker mcp-mission).
+
+    \b
+    Outil machine-to-machine (CredentialBrokerService) — exposé au CLI pour le
+    debug, les tests de contrat et l'exploitation. Le wrap_token retourné est
+    SENSIBLE (single-use, à ne jamais logguer).
+
+    \b
+    Exemples :
+      mcp-vault secret wrap prod db/postgres --mission-id m-42 --operation-id op-1
+      mcp-vault secret wrap prod db/pg --mission-id m-42 --operation-id op-1 --tenant-id t-7 --expected-aud mcp-vault:prod
+    """
+    async def _run():
+        client = MCPClient(ctx.obj["url"], ctx.obj["token"])
+        result = await client.call_tool("secret_wrap", {
+            "vault_id": vault_id,
+            "secret_path": secret_path,
+            "mission_id": mission_id,
+            "operation_id": operation_id,
+            "ttl_seconds": ttl_seconds,
+            "tenant_id": tenant_id,
+            "expected_aud": expected_aud,
+        })
+        if output_json:
+            show_json(result)
+        else:
+            show_wrap_result(result)
+    asyncio.run(_run())
+
+
+@secret_group.command("revoke-wrap")
+@click.argument("lease_id")
+@click.option("--json", "-j", "output_json", is_flag=True, help="Sortie JSON brute")
+@click.pass_context
+def secret_revoke_wrap_cmd(ctx, lease_id, output_json):
+    """Révoquer un wrap token (idempotent — introuvable = succès).
+
+    \b
+    LEASE_ID : accessor du wrap token (retourné par `secret wrap`).
+    """
+    async def _run():
+        client = MCPClient(ctx.obj["url"], ctx.obj["token"])
+        result = await client.call_tool("secret_revoke_wrap", {"lease_id": lease_id})
+        if output_json:
+            show_json(result)
+        else:
+            show_wrap_result(result)
+    asyncio.run(_run())
+
+
+@secret_group.command("wrap-lookup")
+@click.argument("operation_id")
+@click.option("--json", "-j", "output_json", is_flag=True, help="Sortie JSON brute")
+@click.pass_context
+def secret_wrap_lookup_cmd(ctx, operation_id, output_json):
+    """Retrouver et révoquer les wraps d'un operation_id (compensation orphelins).
+
+    \b
+    OPERATION_ID : identifiant d'opération à rechercher dans le registry.
+    """
+    async def _run():
+        client = MCPClient(ctx.obj["url"], ctx.obj["token"])
+        result = await client.call_tool("secret_wrap_lookup", {"operation_id": operation_id})
+        if output_json:
+            show_json(result)
+        else:
+            show_wrap_result(result)
     asyncio.run(_run())
 
 

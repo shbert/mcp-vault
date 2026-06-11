@@ -101,6 +101,31 @@ python scripts/mcp_cli.py secret password -l 16 --no-symbols
 python scripts/mcp_cli.py secret password -l 24 --exclude "lI10O"
 ```
 
+#### JIT Wrap Broker + consommation médiée — C18 *(contrat mcp-mission, admin)*
+
+Outils machine-to-machine du `CredentialBrokerService`, exposés au CLI pour le debug, la révocation et les tests de contrat. Les tokens sensibles passent par variables d'environnement.
+
+```bash
+# Créer un wrap token single-use (retourne un wrap_token SENSIBLE)
+python scripts/mcp_cli.py secret wrap prod db/postgres \
+  --mission-id m-42 --operation-id op-1 --ttl 600
+
+# Binding C18 complet (tenant_id + audience attendue)
+python scripts/mcp_cli.py secret wrap prod db/pg \
+  --mission-id m-42 --operation-id op-1 \
+  --tenant-id t-7 --expected-aud mcp-vault:prod
+
+# Révoquer un wrap (idempotent — introuvable = succès)
+python scripts/mcp_cli.py secret revoke-wrap <accessor>
+
+# Retrouver/révoquer les wraps d'un operation_id (compensation orphelins)
+python scripts/mcp_cli.py secret wrap-lookup op-1
+
+# Consommer un wrap (validation JWT C18) — tokens via env
+VAULT_WRAP_TOKEN=hvs.CAES... VAULT_MISSION_TOKEN=eyJ... \
+  python scripts/mcp_cli.py secret consume op-1
+```
+
 ### SSH Certificate Authority
 
 ```bash

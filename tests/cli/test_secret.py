@@ -20,6 +20,10 @@ _SECRET_LIST     = {"status": "ok", "vault_id": "mon-vault", "keys": ["db/postgr
 _SECRET_DELETED  = {"status": "ok", "vault_id": "mon-vault", "path": "db/postgres"}
 _SECRET_TYPES    = {"status": "ok", "types": [{"name": "login"}, {"name": "database"}]}
 _SECRET_PASSWORD = {"status": "ok", "password": "Xk9#mP2!", "length": 32}
+_WRAP_OK         = {"status": "ok", "wrap_token": "hvs.SENSIBLE", "accessor": "ACC1",
+                    "operation_id": "op-1", "mission_id": "m-1", "expires_at": "2026-06-11T10:00:00Z"}
+_REVOKE_OK       = {"status": "ok", "state": "revoked"}
+_LOOKUP_OK       = {"status": "ok", "state": "revoked", "count_revoked": 1, "entries_found": 1}
 
 
 def test_secret():
@@ -31,7 +35,8 @@ def test_secret():
     section("Aide secret")
     r = run_cli(["secret", "--help"])
     check_value("secret --help exit code", r.exit_code, 0)
-    for subcmd in ["write", "read", "list", "delete", "types", "password"]:
+    for subcmd in ["write", "read", "list", "delete", "types", "password",
+                   "wrap", "revoke-wrap", "wrap-lookup"]:
         check_contains(f"Sous-commande '{subcmd}'", r.output, subcmd)
 
     # ── secret write ─────────────────────────────────────────────────────────
@@ -113,6 +118,49 @@ def test_secret():
     r, mock = run_cli_mocked(["secret", "password"], _SECRET_PASSWORD)
     check_value("Exit code", r.exit_code, 0)
     check("secret_generate_password appelé", mock.called)
+
+    # ── secret wrap ───────────────────────────────────────────────────────────
+    section("secret wrap — appelle secret_wrap avec binding C18")
+    r, mock = run_cli_mocked(
+        ["secret", "wrap", "prod", "db/pg", "--mission-id", "m-1",
+         "--operation-id", "op-1", "--ttl", "600",
+         "--tenant-id", "t-7", "--expected-aud", "mcp-vault:prod"],
+        _WRAP_OK,
+    )
+    check_value("Exit code", r.exit_code, 0)
+    args = mock.call_args[0][1] if mock.call_args else {}
+    check("secret_wrap appelé", mock.call_args is not None and mock.call_args[0][0] == "secret_wrap")
+    check_value("vault_id correct", args.get("vault_id"), "prod")
+    check_value("secret_path correct", args.get("secret_path"), "db/pg")
+    check_value("mission_id transmis", args.get("mission_id"), "m-1")
+    check_value("operation_id transmis", args.get("operation_id"), "op-1")
+    check_value("ttl_seconds transmis", args.get("ttl_seconds"), 600)
+    check_value("tenant_id transmis (binding C18)", args.get("tenant_id"), "t-7")
+    check_value("expected_aud transmis (binding C18)", args.get("expected_aud"), "mcp-vault:prod")
+
+    # ── secret revoke-wrap ──────────────────────────────────────────────────────
+    section("secret revoke-wrap — appelle secret_revoke_wrap avec lease_id")
+    r, mock = run_cli_mocked(["secret", "revoke-wrap", "ACC-XYZ"], _REVOKE_OK)
+    check_value("Exit code", r.exit_code, 0)
+    args = mock.call_args[0][1] if mock.call_args else {}
+    check("secret_revoke_wrap appelé", mock.call_args is not None and mock.call_args[0][0] == "secret_revoke_wrap")
+    check_value("lease_id transmis", args.get("lease_id"), "ACC-XYZ")
+
+    # ── secret wrap-lookup ──────────────────────────────────────────────────────
+    section("secret wrap-lookup — appelle secret_wrap_lookup avec operation_id")
+    r, mock = run_cli_mocked(["secret", "wrap-lookup", "op-42"], _LOOKUP_OK)
+    check_value("Exit code", r.exit_code, 0)
+    args = mock.call_args[0][1] if mock.call_args else {}
+    check("secret_wrap_lookup appelé", mock.call_args is not None and mock.call_args[0][0] == "secret_wrap_lookup")
+    check_value("operation_id transmis", args.get("operation_id"), "op-42")
+
+    # ── Non-complaisant : wrap_token jamais dans l'affichage stdout en clair sans alerte ─
+    section("secret wrap — wrap_token affiché avec alerte SENSIBLE")
+    r, mock = run_cli_mocked(
+        ["secret", "wrap", "prod", "db/pg", "--mission-id", "m-1", "--operation-id", "op-1"],
+        _WRAP_OK,
+    )
+    check_contains("Alerte SENSIBLE présente", r.output, "SENSIBLE")
 
     # ── Erreur propagée ───────────────────────────────────────────────────────
     section("secret read — erreur propagée sans crash")

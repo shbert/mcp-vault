@@ -105,6 +105,12 @@ function _renderPkiPage(s, certs, roles, roleDetail) {
                 ? '<span class="badge badge-ok">Actif</span>'
                 : '<span class="badge badge-warn">Inactif</span>'}</div>
         </div>
+        <div class="card">
+            <div class="card-label">EAB (enrôlement)</div>
+            <div class="card-value">${s.eab_required
+                ? `<span class="badge badge-ok">Requis</span> <span class="help-text">${esc(s.eab_policy || '')}</span>`
+                : `<span class="badge badge-warn">Non requis</span> <span class="help-text">${esc(s.eab_policy || '')}</span>`}</div>
+        </div>
     </div>
 
     <!-- URLs de distribution -->
