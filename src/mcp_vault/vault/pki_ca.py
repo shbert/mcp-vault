@@ -30,6 +30,34 @@ logger = logging.getLogger("mcp-vault.pki-ca")
 _ROOT_MOUNT = "_sys_pki_root"
 _INT_MOUNT = "_sys_pki_int"
 _ACME_ROLE_NAME = "acme-servers"
+# Rôle dédié à l'émission manuelle de certificats (issue #41). Distinct du rôle
+# ACME : autorise les IP SANs, refuse les wildcards manuels, no_store=False pour
+# apparaître dans l'inventaire. allowed_domains alignés sur le rôle ACME.
+_MANUAL_ROLE_NAME = "manual-servers"
+# Format TTL OpenBao (ex : 720h, 30m, 90d) — validation locale.
+_TTL_PATTERN = re.compile(r'^\d{1,6}[smhd]$')
+_TTL_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def _ttl_to_seconds(ttl) -> Optional[int]:
+    """Convertit un TTL ('720h', '90d', ou un int de secondes) en secondes. None si invalide."""
+    if isinstance(ttl, int):
+        return ttl if ttl >= 0 else None
+    if not isinstance(ttl, str):
+        return None
+    ttl = ttl.strip()
+    if not _TTL_PATTERN.match(ttl):
+        return None
+    return int(ttl[:-1]) * _TTL_UNITS[ttl[-1]]
+
+
+def _normalize_domain_list(value) -> list:
+    """Normalise allowed_domains (liste OU chaîne CSV renvoyée par OpenBao) en liste."""
+    if isinstance(value, str):
+        return [d.strip() for d in value.split(",") if d.strip()]
+    if isinstance(value, list):
+        return [str(d).strip() for d in value if str(d).strip()]
+    return []
 
 # Politiques EAB valides côté OpenBao (config/acme). "required" N'EXISTE PAS —
 # valeurs acceptées : not-required, new-account-required, always-required.
@@ -45,6 +73,26 @@ _ACME_RESPONSE_HEADERS = ["Replay-Nonce", "Link", "Location"]
 def _eab_required(eab_policy: str) -> bool:
     """True si la politique EAB impose un External Account Binding."""
     return eab_policy in ("new-account-required", "always-required")
+
+
+def _domain_allowed(name: str, allowed_domains: list) -> bool:
+    """
+    True si `name` (FQDN) appartient à l'un des domaines autorisés du rôle :
+    correspondance exacte ou sous-domaine. Validation locale (issue #41) en
+    complément du contrôle OpenBao — on ne délègue pas uniquement au backend.
+    """
+    name = (name or "").lower().strip().rstrip(".")
+    if not name:
+        return False
+    for d in (allowed_domains or []):
+        d = (d or "").lower().strip().rstrip(".")
+        if not d:
+            continue
+        if d.startswith("*."):
+            d = d[2:]
+        if name == d or name.endswith("." + d):
+            return True
+    return False
 
 # Préfixe protégé — utilisé dans spaces.py et server.py pour refuser vault_delete
 RESERVED_MOUNT_PREFIX = "_sys_pki_"
@@ -558,6 +606,162 @@ async def list_issued_certs(limit: int = 100, offset: int = 0) -> dict:
             return {"status": "ok", "total": 0, "offset": offset, "limit": limit, "certs": []}
         logger.error(f"❌ Erreur inventaire certs PKI : {e}")
         return {"status": "error", "message": str(e)}
+
+
+def _ensure_manual_role(client, allowed_domains: list, max_ttl: str) -> None:
+    """
+    Crée/met à jour (idempotent) le rôle d'émission manuelle `manual-servers`.
+
+    Distinct du rôle ACME : autorise les IP SANs, refuse les wildcards (émission
+    manuelle nominative), no_store=False (inventaire). Domaines alignés sur la PKI.
+    """
+    client.write(
+        f"{_INT_MOUNT}/roles/{_MANUAL_ROLE_NAME}",
+        server_flag=True,
+        client_flag=False,
+        allow_any_name=False,
+        allow_localhost=False,
+        allow_ip_sans=True,
+        allowed_domains=allowed_domains,
+        allow_subdomains=True,
+        allow_wildcard_certificates=False,
+        enforce_hostnames=True,
+        max_ttl=max_ttl,
+        no_store=False,
+        key_type="rsa",
+        key_bits=2048,
+        require_cn=True,
+    )
+
+
+async def issue_certificate(common_name: str, ttl: str = "720h",
+                            alt_names: str = "", ip_sans: str = "") -> dict:
+    """
+    Émet un certificat serveur signé par la CA intermédiaire (émission manuelle,
+    hors ACME — issue #41).
+
+    Sécurité :
+    - common_name et alt_names DNS validés localement contre les allowed_domains
+      du rôle ACME (en plus du contrôle OpenBao via le rôle manual-servers).
+    - ip_sans validés via ipaddress.
+    - ttl borné par le max_ttl du rôle (OpenBao) + format validé localement.
+    - private_key retournée UNE FOIS (jamais stockée côté Vault, jamais loggée).
+
+    Returns: {status, serial_number, certificate, private_key (SENSIBLE),
+              ca_chain, expiration, common_name}
+    """
+    if not is_pki_initialized():
+        return {"status": "error", "message": "PKI non initialisée"}
+
+    client = _get_hvac_client()
+    if not client:
+        return {"status": "error", "message": "OpenBao non connecté"}
+
+    common_name = (common_name or "").strip().lower()
+    if not common_name:
+        return {"status": "error", "error_type": "invalid_input", "message": "common_name requis"}
+    if not _TTL_PATTERN.match(ttl or ""):
+        return {"status": "error", "error_type": "invalid_input",
+                "message": "ttl invalide (ex: 720h, 30m, 90d)"}
+
+    # Domaines autorisés de la PKI (lus sur le rôle ACME) — référence de validation.
+    try:
+        role_resp = client.read(f"{_INT_MOUNT}/roles/{_ACME_ROLE_NAME}")
+        role_data = (role_resp or {}).get("data") or {}
+        # OpenBao peut renvoyer allowed_domains en liste OU chaîne CSV → normaliser.
+        allowed_domains = _normalize_domain_list(role_data.get("allowed_domains"))
+        role_max_ttl_sec = _ttl_to_seconds(role_data.get("max_ttl")) or _ttl_to_seconds("8760h")
+        role_max_ttl = role_data.get("max_ttl") or "8760h"
+        if isinstance(role_max_ttl, int):
+            role_max_ttl = f"{role_max_ttl}s"
+    except Exception as e:
+        logger.error("issue_certificate : lecture rôle ACME échouée : %s", type(e).__name__)
+        return {"status": "error", "message": "Impossible de lire la configuration PKI"}
+
+    if not allowed_domains:
+        return {"status": "error", "message": "Aucun domaine autorisé configuré sur la PKI"}
+
+    # Validation locale de la borne TTL (pas seulement le format) — défense en profondeur.
+    req_ttl_sec = _ttl_to_seconds(ttl)
+    if req_ttl_sec is None:
+        return {"status": "error", "error_type": "invalid_input",
+                "message": "ttl invalide (ex: 720h, 30m, 90d)"}
+    if role_max_ttl_sec and req_ttl_sec > role_max_ttl_sec:
+        return {"status": "error", "error_type": "invalid_input",
+                "message": f"ttl {ttl} dépasse le max autorisé ({role_max_ttl})"}
+
+    # Validation locale des noms DNS (CN + alt_names) contre allowed_domains.
+    extra_dns = [a.strip().lower() for a in (alt_names or "").split(",") if a.strip()]
+    for name in [common_name] + extra_dns:
+        if "*" in name:
+            return {"status": "error", "error_type": "invalid_input",
+                    "message": f"Wildcard interdit en émission manuelle : {name}"}
+        if not _domain_allowed(name, allowed_domains):
+            return {"status": "error", "error_type": "domain_not_allowed",
+                    "message": f"Nom hors domaines autorisés : {name}"}
+
+    # Validation locale des IP SANs.
+    ip_list = [x.strip() for x in (ip_sans or "").split(",") if x.strip()]
+    if ip_list:
+        import ipaddress
+        for ip in ip_list:
+            try:
+                ipaddress.ip_address(ip)
+            except ValueError:
+                return {"status": "error", "error_type": "invalid_input",
+                        "message": f"IP SAN invalide : {ip}"}
+
+    # Rôle d'émission manuelle (idempotent, sous lock pour éviter les races).
+    async with _get_setup_lock():
+        try:
+            _ensure_manual_role(client, allowed_domains, role_max_ttl)
+        except Exception as e:
+            logger.error("issue_certificate : création rôle manual échouée : %s", type(e).__name__)
+            return {"status": "error", "message": "Impossible de configurer le rôle d'émission"}
+
+    # Émission.
+    try:
+        issue_args = {"common_name": common_name, "ttl": ttl}
+        if extra_dns:
+            issue_args["alt_names"] = ",".join(extra_dns)
+        if ip_list:
+            issue_args["ip_sans"] = ",".join(ip_list)
+        resp = client.write(f"{_INT_MOUNT}/issue/{_MANUAL_ROLE_NAME}", **issue_args)
+        data = (resp or {}).get("data") or {}
+    except Exception as e:
+        err = str(e).lower()
+        logger.error("issue_certificate OpenBao error: %s", type(e).__name__)
+        if any(k in err for k in ("not allowed", "not match", "domain")):
+            return {"status": "error", "error_type": "domain_not_allowed",
+                    "message": "Nom refusé par la politique du rôle"}
+        return {"status": "error", "error_type": "backend_error",
+                "message": "Émission du certificat échouée (voir logs serveur)"}
+
+    if not data.get("certificate") or not data.get("private_key"):
+        return {"status": "error", "error_type": "backend_error",
+                "message": "Réponse d'émission incomplète"}
+
+    # Sync S3 (le nouveau cert est stocké dans l'inventaire).
+    from ..s3_sync import upload_to_s3
+    sync_ok = await upload_to_s3()
+    if not sync_ok:
+        logger.error("❌ Sync S3 échouée après émission cert — durabilité inventaire compromise")
+
+    ca_chain = data.get("ca_chain")
+    if isinstance(ca_chain, list):
+        ca_chain = "\n".join(ca_chain)
+
+    logger.info("✅ Certificat émis : cn=%s serial=%s", common_name, data.get("serial_number", "?"))
+    return {
+        "status": "ok",
+        "common_name": common_name,
+        "serial_number": data.get("serial_number", ""),
+        "certificate": data.get("certificate", ""),
+        "private_key": data.get("private_key", ""),  # SENSIBLE — one-shot
+        "ca_chain": ca_chain or data.get("issuing_ca", ""),
+        "expiration": data.get("expiration", ""),
+        "s3_sync_ok": sync_ok,
+    }
 
 
 async def revoke_cert(serial_number: str) -> dict:

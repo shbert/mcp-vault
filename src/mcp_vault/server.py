@@ -47,6 +47,7 @@ _TOOL_LABELS = {
     "pki_ca_setup": "Setup PKI CA", "pki_ca_public_key": "Clé publique CA PKI",
     "pki_ca_list_roles": "Liste rôles PKI", "pki_ca_role_info": "Détails rôle PKI",
     "pki_list_certs": "Inventaire certs PKI", "pki_revoke_cert": "Révocation cert PKI",
+    "pki_issue_cert": "Émission cert PKI",
     "pki_ca_rotate_intermediate": "Rotation intermédiaire PKI",
     "secret_consume": "Consommation médiée (C18)",
 }
@@ -1162,6 +1163,38 @@ async def pki_revoke_cert(serial_number: str) -> dict:
         return admin_err
 
     return _r("pki_revoke_cert", await revoke_cert(serial_number))
+
+
+@mcp.tool()
+async def pki_issue_cert(common_name: str, ttl: str = "720h",
+                         alt_names: str = "", ip_sans: str = "") -> dict:
+    """
+    Émet un certificat serveur signé par la CA intermédiaire (émission manuelle, hors ACME).
+
+    Réservé admin. La clé privée est retournée UNE FOIS et n'est jamais stockée
+    côté Vault ni journalisée — à sauvegarder immédiatement côté appelant.
+
+    Args:
+        common_name: FQDN principal du certificat (doit appartenir aux domaines autorisés).
+        ttl: Durée de validité (ex: 720h, 30m, 90d), bornée par le max_ttl du rôle.
+        alt_names: SANs DNS supplémentaires, séparés par des virgules (optionnel).
+        ip_sans: SANs IP, séparés par des virgules (optionnel).
+    """
+    from .auth.context import check_admin_permission, check_policy
+    from .vault.pki_ca import issue_certificate
+
+    policy_err = check_policy("pki_issue_cert")
+    if policy_err:
+        return policy_err
+    admin_err = check_admin_permission()
+    if admin_err:
+        return admin_err
+
+    result = await issue_certificate(common_name, ttl, alt_names, ip_sans)
+    # Audit : jamais la clé privée ni le certificat complet — seulement CN + serial.
+    audit_result = {k: v for k, v in result.items() if k not in ("private_key", "certificate", "ca_chain")}
+    _r("pki_issue_cert", audit_result, detail=f"cn={common_name[:48]}")
+    return result
 
 
 @mcp.tool()

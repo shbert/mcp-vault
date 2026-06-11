@@ -1,5 +1,31 @@
 # Changelog — MCP Vault
 
+## [0.6.6] — 2026-06-11
+
+### Génération de certificat depuis /admin + CLI (issue #41, partie 2/2)
+
+Nouvel outil `pki_issue_cert` (36 outils MCP) : émission manuelle d'un certificat serveur signé par la CA intermédiaire, hors ACME — pour le debug, l'exploitation et les cas sans enrôlement automatique.
+
+#### Backend (`vault/pki_ca.py`, `server.py`, `admin/api.py`)
+- `pki_issue_cert(common_name, ttl?, alt_names?, ip_sans?)` (admin).
+- **Rôle dédié `manual-servers`** (création idempotente) : `allow_ip_sans=True`, `no_store=False` (inventaire), wildcards refusés — distinct du rôle ACME (reco Codex).
+- **Validation locale** avant émission : CN + SANs DNS contre les `allowed_domains` de la PKI, IP via `ipaddress`, format **et borne max** du TTL (vs `max_ttl` du rôle), wildcard interdit.
+- **Clé privée one-shot** : retournée une seule fois, jamais stockée côté Vault, jamais journalisée ni auditée (audit filtre `private_key`/`certificate`/`ca_chain`).
+- Route REST `POST /admin/api/pki/issue` (admin, codes 400/500).
+
+#### CLI (`pki issue`)
+- Click + shell : `pki issue <common_name> [--ttl] [--alt-names] [--ip-sans]`.
+- Affichage avec alerte **SENSIBLE** sur la clé privée.
+
+#### SPA `/admin`
+- Bouton « Générer un certificat » + modale `modalPkiIssue`.
+- Clé privée affichée via `textarea.value` (jamais `innerHTML`), **sans copie automatique** au presse-papier (décision Codex).
+
+#### Tests
+- `tests/test_pki.py::TestIssueCertificate` (9 tests) : nominal, domaine refusé, wildcard, TTL format + borne max, IP invalide, alt_name validé, `allowed_domains` en CSV, clé privée absente de l'audit. `tests/cli/test_pki.py` : `pki issue`. 44/44 PKI verts.
+
+> Partie 1/2 (#41) livrée en v0.6.5 (refonte CSS du panneau PKI).
+
 ## [0.6.5] — 2026-06-11
 
 ### UI — panneau PKI /admin lisible (issue #41, partie 1/2)

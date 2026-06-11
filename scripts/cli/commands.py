@@ -768,6 +768,41 @@ def pki_certs_cmd(ctx, limit, offset, output_json):
     asyncio.run(_run())
 
 
+@pki_group.command("issue")
+@click.argument("common_name")
+@click.option("--ttl", default="720h", help="Durée de validité (ex: 720h, 30m, 90d)")
+@click.option("--alt-names", "alt_names", default="", help="SANs DNS supplémentaires (virgules)")
+@click.option("--ip-sans", "ip_sans", default="", help="SANs IP (virgules)")
+@click.option("--json", "-j", "output_json", is_flag=True, help="Sortie JSON brute")
+@click.pass_context
+def pki_issue_cmd(ctx, common_name, ttl, alt_names, ip_sans, output_json):
+    """Émettre un certificat serveur signé par la CA intermédiaire (émission manuelle).
+
+    \b
+    ⚠️  La clé privée est affichée UNE FOIS — la sauvegarder immédiatement.
+        Le common_name doit appartenir aux domaines autorisés de la PKI.
+
+    \b
+    Exemples :
+      pki issue www.cloud-temple.app
+      pki issue api.cloud-temple.app --ttl 2160h --alt-names api2.cloud-temple.app
+      pki issue node1.cloud-temple.app --ip-sans 10.0.0.4
+    """
+    async def _run():
+        client = MCPClient(ctx.obj["url"], ctx.obj["token"])
+        result = await client.call_tool("pki_issue_cert", {
+            "common_name": common_name,
+            "ttl": ttl,
+            "alt_names": alt_names,
+            "ip_sans": ip_sans,
+        })
+        if output_json:
+            show_json(result)
+        else:
+            show_pki_result(result)
+    asyncio.run(_run())
+
+
 @pki_group.command("revoke")
 @click.argument("serial_number")
 @click.option("--json", "-j", "output_json", is_flag=True, help="Sortie JSON brute")

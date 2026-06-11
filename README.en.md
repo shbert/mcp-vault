@@ -63,7 +63,7 @@ On shutdown (`docker compose stop`):
 
 ---
 
-## 🛠️ MCP tools (35)
+## 🛠️ MCP tools (36)
 
 ### System (2)
 
@@ -126,7 +126,7 @@ Policies restrict the tools accessible per token, with support for **wildcards**
 | -------------------------------------------------------------- | ----- | ------------------------------------------------------- |
 | `token_update(hash_prefix, policy_id?, permissions?, vaults?)` | admin | Modifies an existing token (policy, permissions, vaults) |
 
-### Internal PKI — CA + ACME (7) *(v0.5.0)*
+### Internal PKI — CA + ACME (8) *(v0.5.0)*
 
 Sovereign CA for the ecosystem: Caddy WAFs enroll via ACME exactly like with Let's Encrypt, but on an internal CA isolated from the public network. Usable in lab (`*.lesur.lan`) and in air-gapped production.
 
@@ -137,6 +137,7 @@ Sovereign CA for the ecosystem: Caddy WAFs enroll via ACME exactly like with Let
 | `pki_ca_list_roles()` | read | Lists issuance roles |
 | `pki_ca_role_info(role_name)` | read | Role details (domains, TTL, TLS flags) |
 | `pki_list_certs(limit?, offset?)` | admin | Paginated inventory of issued certificates |
+| `pki_issue_cert(common_name, ttl?, alt_names?, ip_sans?)` | admin | Manual certificate issuance (off-ACME) — one-shot private key |
 | `pki_revoke_cert(serial_number)` | admin | Revocation + CRL update |
 | `pki_ca_rotate_intermediate(keep_old_issuer?, overlap_ttl?)` | admin | Intermediate CA rotation without downtime |
 
@@ -156,7 +157,7 @@ Contract for the mcp-mission `CredentialBrokerService`: single-use credential de
 | `secret_consume(wrap_token, operation_id, mission_token)` | admin | Validates ES256/JWKS JWT, checks full binding (mission_id, tenant_id, aud), unwraps OpenBao (C18) |
 
 > Enable C18 validation with `ENFORCE_MISSION_TOKEN_VALIDATION=true`. Default (false): log warning, continue — zero impact in standalone mode without mcp-mission.
-> `tenant_id` and `expected_aud` in `secret_wrap` feed the full C18 binding on the `secret_consume` side *(v0.6.5)*.
+> `tenant_id` and `expected_aud` in `secret_wrap` feed the full C18 binding on the `secret_consume` side *(v0.6.6)*.
 
 ### Audit (1)
 
@@ -342,7 +343,7 @@ OpenBao's unseal keys are protected by **3-factor physical separation**:
 
 | Version              | Approach                                                                                                            |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **v0.6.5** (current) | Keys on S3 encrypted AES-256-GCM+AAD, memory-only at runtime — C18 hardening: singleton JWT + full tenant_id/aud binding |
+| **v0.6.6** (current) | Keys on S3 encrypted AES-256-GCM+AAD, memory-only at runtime — C18 hardening: singleton JWT + full tenant_id/aud binding |
 | **v1.0**             | Transit Auto-Unseal via dedicated OpenBao (Cloud Temple KMS)                                                        |
 | **v2.0**             | **HSM connection** (Hardware Security Module) Cloud Temple — keys never leave the certified hardware module        |
 
@@ -378,7 +379,7 @@ docker compose exec mcp-vault python tests/test_e2e.py --test enforcement
 
 | Category               | Tests  | Description                                                                        |
 | ---------------------- | ------ | ---------------------------------------------------------------------------------- |
-| System                 | 7      | health, about, services, tools_count (35)                                          |
+| System                 | 7      | health, about, services, tools_count (36)                                          |
 | Vault CRUD             | 28     | create + metadata, list, info + owner, update, delete, confirm, errors             |
 | Secrets CRUD           | 24     | 10 types written, read/list/delete, validation                                     |
 | Versioning             | 8      | v1→v2→v3, read latest, read specific                                               |
@@ -405,10 +406,10 @@ mcp-vault/
 ├── Dockerfile                # Multi-stage (OpenBao 2.5.1 + Python 3.12)
 ├── requirements.txt          # Python dependencies
 ├── requirements.lock         # Pinned dependencies (exact versions)
-├── VERSION                   # 0.6.5
+├── VERSION                   # 0.6.6
 ├── DESIGN/mcp-vault/
-│   ├── ARCHITECTURE.md       # Detailed specification (v0.6.5)
-│   ├── TECHNICAL.md          # Technical documentation (v0.6.5)
+│   ├── ARCHITECTURE.md       # Detailed specification (v0.6.6)
+│   ├── TECHNICAL.md          # Technical documentation (v0.6.6)
 │   └── SECURITY_AUDIT.md     # Consolidated audit report (60 V2.1 findings)
 ├── scripts/
 │   ├── mcp_cli.py            # CLI entry point
@@ -421,7 +422,7 @@ mcp-vault/
 │       └── shell.py          # Interactive shell
 ├── src/mcp_vault/
 │   ├── config.py             # pydantic-settings configuration
-│   ├── server.py             # FastMCP + 35 MCP tools + lifecycle + audit
+│   ├── server.py             # FastMCP + 36 MCP tools + lifecycle + audit
 │   ├── lifecycle.py          # startup/shutdown orchestrator
 │   ├── s3_client.py          # Hybrid SigV2/SigV4 S3 client
 │   ├── s3_sync.py            # File backend ↔ S3 sync
@@ -467,4 +468,4 @@ mcp-vault/
 
 ---
 
-**License**: Apache 2.0 | **Author**: Cloud Temple | **Version**: 0.6.5
+**License**: Apache 2.0 | **Author**: Cloud Temple | **Version**: 0.6.6

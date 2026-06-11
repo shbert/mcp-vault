@@ -270,6 +270,38 @@
     </div>
 </div>
 
+<!-- ═══════════════ MODAL — PKI Émission de certificat ═══════════════ -->
+<div id="modalPkiIssue" class="modal-overlay">
+    <div class="modal">
+        <h2>📜 Générer un certificat</h2>
+        <div class="form-group">
+            <label for="pkiIssueCn">Common Name (FQDN) <span class="field-required">*</span></label>
+            <input type="text" id="pkiIssueCn" placeholder="www.cloud-temple.app">
+            <div class="help-text">Doit appartenir aux domaines autorisés de la PKI. Pas de wildcard en émission manuelle.</div>
+        </div>
+        <div class="form-group">
+            <label for="pkiIssueTtl">TTL</label>
+            <input type="text" id="pkiIssueTtl" value="720h" placeholder="720h">
+            <div class="help-text">Durée de validité (ex: 720h, 30m, 90d), bornée par le max_ttl du rôle.</div>
+        </div>
+        <div class="form-group">
+            <label for="pkiIssueAltNames">SANs DNS supplémentaires</label>
+            <input type="text" id="pkiIssueAltNames" placeholder="api.cloud-temple.app, api2.cloud-temple.app">
+            <div class="help-text">Noms DNS additionnels, séparés par des virgules (optionnel).</div>
+        </div>
+        <div class="form-group">
+            <label for="pkiIssueIpSans">SANs IP</label>
+            <input type="text" id="pkiIssueIpSans" placeholder="10.0.0.4, 10.0.0.5">
+            <div class="help-text">Adresses IP, séparées par des virgules (optionnel).</div>
+        </div>
+        <div class="help-text">⚠️ La clé privée sera affichée une seule fois — sauvegardez-la immédiatement.</div>
+        <div class="modal-actions">
+            <button class="btn btn-ghost" onclick="closeModal('modalPkiIssue')">Annuler</button>
+            <button class="btn btn-primary" onclick="doPkiIssue()">Générer</button>
+        </div>
+    </div>
+</div>
+
 <!-- ═══════════════ MODAL — SSH CA Setup ═══════════════ -->
 <div id="modalSshSetup" class="modal-overlay">
     <div class="modal">

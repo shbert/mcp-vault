@@ -656,6 +656,26 @@ def show_pki_result(result: dict):
         show_error(result.get("message", "Erreur PKI"))
         return
 
+    # Émission de certificat : retourne certificate + private_key (SENSIBLE, one-shot)
+    if "private_key" in result and "certificate" in result:
+        show_success(f"Certificat émis — CN : {result.get('common_name', '?')}")
+        table = Table(show_header=False)
+        table.add_column("Champ", style="cyan bold", min_width=18)
+        table.add_column("Valeur")
+        table.add_row("Serial",     result.get("serial_number", "?"))
+        table.add_row("Expiration", str(result.get("expiration", "?")))
+        if result.get("s3_sync_ok") is False:
+            table.add_row("[red]S3 sync[/red]", "[red]ÉCHEC[/red]")
+        console.print(table)
+        console.print("\n[bold yellow]⚠️  CLÉ PRIVÉE — affichée une seule fois, à sauvegarder MAINTENANT :[/bold yellow]")
+        console.print(result.get("private_key", ""))
+        console.print("\n[bold]Certificat :[/bold]")
+        console.print(result.get("certificate", ""))
+        if result.get("ca_chain"):
+            console.print("\n[bold]Chaîne CA :[/bold]")
+            console.print(result.get("ca_chain"))
+        return
+
     # Setup : retourne root_mount + acme_directory
     if "root_mount" in result and "acme_directory" in result:
         lab = result.get("lab_mode", True)
