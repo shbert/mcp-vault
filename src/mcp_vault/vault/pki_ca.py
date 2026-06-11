@@ -346,13 +346,14 @@ async def setup_pki_ca(lab_mode: bool = True,
                 allow_localhost=False,
                 allow_ip_sans=False,
                 allowed_domains=allowed_domains,
+                allow_bare_domains=True,   # émettre pour les domaines exactement listés
                 allow_subdomains=True,
+                allow_glob_domains=True,   # supporter les patterns *.domain dans allowed_domains
                 allow_wildcard_certificates=True,
                 enforce_hostnames=True,
                 max_ttl=leaf_ttl,
                 no_store=False,
-                key_type="rsa",
-                key_bits=2048,
+                key_type="any",   # clients ACME (Caddy) génèrent souvent des clés EC — ne pas imposer RSA
                 require_cn=False,
             )
             logger.info(f"✅ Rôle ACME '{_ACME_ROLE_NAME}' configuré pour {allowed_domains}")
@@ -623,7 +624,9 @@ def _ensure_manual_role(client, allowed_domains: list, max_ttl: str) -> None:
         allow_localhost=False,
         allow_ip_sans=True,
         allowed_domains=allowed_domains,
+        allow_bare_domains=True,   # émettre pour les domaines exactement listés
         allow_subdomains=True,
+        allow_glob_domains=True,
         allow_wildcard_certificates=False,
         enforce_hostnames=True,
         max_ttl=max_ttl,

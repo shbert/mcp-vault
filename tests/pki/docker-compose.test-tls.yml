@@ -1,0 +1,14 @@
+# Override de TEST E2E ACME (issue #41/#42) — NE PAS utiliser en prod.
+# Active TLS interne sur le WAF et expose le directory ACME en HTTPS,
+# car Caddy (client ACME) refuse une CA ACME servie en HTTP.
+#
+# Usage :
+#   docker compose -f docker-compose.yml -f tests/pki/docker-compose.test-tls.yml up -d
+services:
+  waf:
+    environment:
+      - SITE_ADDRESS=https://waf:8085
+      - WAF_TLS_DIRECTIVE=tls internal
+  mcp-vault:
+    environment:
+      - PKI_BASE_URL=https://waf:8085

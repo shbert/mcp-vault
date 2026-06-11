@@ -3,7 +3,7 @@
         output stdout
         level INFO
     }
-    acme_ca http://mcp-vault:8030/acme/directory
+    acme_ca https://waf:8085/acme/directory
     acme_ca_root /data/ca-root.pem
     email test@lesur.lan
 }

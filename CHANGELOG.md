@@ -1,5 +1,28 @@
 # Changelog — MCP Vault
 
+## [0.6.8] — 2026-06-11
+
+### PKI/ACME — enrollment end-to-end fonctionnel (issue #41)
+
+Première validation **réelle** de l'enrollment ACME de bout en bout : un WAF Caddy obtient un certificat TLS depuis la PKI interne (challenge tls-alpn-01 → finalize → cert émis), à travers le WAF en HTTPS. Le test révèle et corrige une cascade de blocages jusqu'alors invisibles (tests mockés + T1/T7 jamais exécutés en conditions réelles).
+
+#### WAF (`waf/coraza.conf`)
+- **920420** « Request content type not allowed » : exclu sur les paths ACME — ACME utilise `Content-Type: application/jose+json` (JWS, RFC 8555), non autorisé par le CRS par défaut.
+- **Regex d'exclusion ACME élargie** au sous-arbre complet (`^/acme/[a-zA-Z0-9/_\-]{1,256}$` et `/v1/_sys_pki_int/acme/...`) : couvre les endpoints dynamiques `authorization/<id>`, `order/<id>`, `order/<id>/finalize`, `challenge/<id>`, `certificate/<id>` — auparavant 403. Anti-traversal assuré en amont par `PkiMiddleware`.
+
+#### Rôle ACME (`vault/pki_ca.py`)
+- `key_type` `rsa` → **`any`** : les clients ACME (Caddy) génèrent des clés EC par défaut ; imposer RSA causait `badCSR - requires rsa`.
+- **`allow_bare_domains=True`** : émettre pour les domaines exactement listés (sinon `rejectedIdentifier` sur le FQDN nominal).
+- **`allow_glob_domains=True`** : support des patterns `*.domain` dans `allowed_domains`.
+
+#### WAF TLS paramétrable (`waf/Caddyfile`, `docker-compose.yml`)
+- `WAF_TLS_DIRECTIVE` (vide par défaut = prod inchangée) : permet d'activer `tls internal` pour servir le directory ACME en HTTPS (Caddy refuse l'ACME sur une CA HTTP).
+
+#### Infra de test E2E (`tests/pki/`)
+- `docker-compose.test-tls.yml` (override TLS), alias réseau `test.lesur.lan`, Caddyfile pointant le directory HTTPS. Procédure documentée pour rejouer l'enrollment complet.
+
+> **Prérequis de déploiement** : l'image mcp-vault doit être rebuildée (le tuning `allowed_response_headers` de #32, requis pour le header `Replay-Nonce`, n'était pas dans les images < v0.6.4).
+
 ## [0.6.7] — 2026-06-11
 
 ### Fix WAF — exclusions CRS inopérantes en phase:1 (issue #42, BLOQUANT prod)

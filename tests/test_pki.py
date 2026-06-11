@@ -514,6 +514,31 @@ class TestIssueCertificate:
         })
         return client
 
+    def test_acme_role_accepts_ec_and_bare_domains(self):
+        """
+        Le rôle ACME doit accepter les clés EC (Caddy génère EC par défaut) et
+        les domaines exacts (bare) — sinon l'enrollment ACME réel échoue
+        (badCSR 'requires rsa' / rejectedIdentifier). Régression E2E #41.
+        """
+        from mcp_vault.vault.pki_ca import setup_pki_ca, _ACME_ROLE_NAME
+        mock_client = MagicMock()
+        mock_client.write = MagicMock(return_value={"data": {
+            "certificate": "", "csr": "-----BEGIN CERTIFICATE REQUEST-----\nM\n-----END CERTIFICATE REQUEST-----",
+            "imported_issuers": ["i"], "default": "i",
+        }})
+        with patch("mcp_vault.vault.pki_ca._get_hvac_client", return_value=mock_client), \
+             patch("mcp_vault.s3_sync.upload_to_s3", new_callable=AsyncMock, return_value=True), \
+             patch("mcp_vault.vault.pki_ca._read_pem_url", new_callable=AsyncMock, return_value=_MOCK_CERT_PEM):
+            _run(setup_pki_ca(lab_mode=True, allowed_domains=["test.lan"]))
+
+        role_calls = [c for c in mock_client.write.call_args_list
+                      if c.args and str(c.args[0]).endswith(f"roles/{_ACME_ROLE_NAME}")]
+        assert role_calls, "Rôle ACME non configuré"
+        kw = role_calls[-1].kwargs
+        assert kw.get("key_type") == "any", f"key_type doit être 'any' (clés EC) : {kw.get('key_type')}"
+        assert kw.get("allow_bare_domains") is True, "allow_bare_domains doit être True"
+        assert kw.get("allow_glob_domains") is True, "allow_glob_domains doit être True"
+
     def test_issue_ok_nominal(self):
         """CN dans le domaine autorisé → émission ok + clé privée retournée."""
         from mcp_vault.vault.pki_ca import issue_certificate
