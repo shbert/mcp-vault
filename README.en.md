@@ -2,7 +2,7 @@
 
 > **Secure secret management for AI agents — embedded OpenBao**
 
-> 🇫🇷 [Version française](README.md)
+> 🇫🇷 [Français](README.md) · 🇩🇪 [Deutsch](README.de.md)
 
 MCP Vault is an [MCP](https://modelcontextprotocol.io/) server that provides a secret vault for AI agents and missions. It embeds [OpenBao](https://openbao.org/) (open-source fork of HashiCorp Vault, Linux Foundation) as its encryption engine.
 
