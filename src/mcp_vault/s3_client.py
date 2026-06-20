@@ -36,10 +36,19 @@ def get_s3_data_client():
     global _client_v2
     if _client_v2 is None:
         settings = get_settings()
+        # SigV2 par défaut (compat Dell ECS) ; SigV4 si s3_force_sigv4 (backends
+        # modernes SigV4-only : MinIO, VersityGW, AWS). En SigV4 sur les données,
+        # on désactive le payload signing (streaming non chunké) pour compat large.
+        if settings.s3_force_sigv4:
+            data_s3_opts = {"addressing_style": "path", "payload_signing_enabled": False}
+            data_sig = "s3v4"
+        else:
+            data_s3_opts = {"addressing_style": "path"}
+            data_sig = "s3"  # SigV2 legacy — requis par Dell ECS
         config_v2 = Config(
             region_name=settings.s3_region_name,
-            signature_version="s3",  # SigV2 legacy — requis par Dell ECS
-            s3={"addressing_style": "path"},
+            signature_version=data_sig,
+            s3=data_s3_opts,
             retries={"max_attempts": 3, "mode": "adaptive"},
         )
         _client_v2 = boto3.client(

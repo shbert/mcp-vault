@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     s3_secret_access_key: str = ""
     s3_bucket_name: str = ""
     s3_region_name: str = "fr1"
+    # Force SigV4 sur le client "data" (PUT/GET/DELETE).
+    # Par défaut False → SigV2 (compat Dell ECS, comportement upstream historique).
+    # Mettre True pour les backends S3 modernes SigV4-only (MinIO, VersityGW, AWS).
+    s3_force_sigv4: bool = False
 
     # --- OpenBao ---
     openbao_addr: str = "http://127.0.0.1:8200"
