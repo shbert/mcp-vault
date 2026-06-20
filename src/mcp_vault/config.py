@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     mcp_server_host: str = "0.0.0.0"
     mcp_server_port: int = 8030
     mcp_server_debug: bool = False
+    vault_lang: str = "en"  # langue des descriptions d'outils MCP (en|de|fr), surchargeable via VAULT_LANG
 
     # --- WAF ---
     # Port externe du WAF Caddy (variable partagée avec docker-compose). Déclaré ici

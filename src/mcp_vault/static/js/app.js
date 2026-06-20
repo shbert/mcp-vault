@@ -6,20 +6,20 @@
 function buildSidebar() {
     const nav = document.getElementById('sidebarNav');
     let html = `
-        <button onclick="navigate('dashboard')" id="nav-dashboard" class="active">📊 <span>Dashboard</span></button>
-        <button onclick="navigate('vaults')" id="nav-vaults">🗄️ <span>Vaults</span></button>`;
+        <button onclick="navigate('dashboard')" id="nav-dashboard" class="active">📊 <span>${t('nav.dashboard')}</span></button>
+        <button onclick="navigate('vaults')" id="nav-vaults">🗄️ <span>${t('nav.vaults')}</span></button>`;
 
     if (isAdmin()) {
         html += `
-        <div class="sidebar-section">Administration</div>
-        <button onclick="navigate('policies')" id="nav-policies">📋 <span>Policies</span></button>
-        <button onclick="navigate('tokens')" id="nav-tokens">🔑 <span>Tokens</span></button>
-        <button onclick="navigate('pki')" id="nav-pki">🔐 <span>PKI / TLS</span></button>`;
+        <div class="sidebar-section">${t('nav.administration')}</div>
+        <button onclick="navigate('policies')" id="nav-policies">📋 <span>${t('nav.policies')}</span></button>
+        <button onclick="navigate('tokens')" id="nav-tokens">🔑 <span>${t('nav.tokens')}</span></button>
+        <button onclick="navigate('pki')" id="nav-pki">🔐 <span>${t('nav.pki')}</span></button>`;
     }
 
     html += `
-        <div class="sidebar-section">Monitoring</div>
-        <button onclick="navigate('activity')" id="nav-activity">📡 <span>Activité</span></button>`;
+        <div class="sidebar-section">${t('nav.monitoring')}</div>
+        <button onclick="navigate('activity')" id="nav-activity">📡 <span>${t('nav.activity')}</span></button>`;
 
     nav.innerHTML = html;
 }
@@ -61,7 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const ok = await doLogin(token);
         if (!ok) {
             const err = document.getElementById('loginError');
-            err.textContent = 'Token invalide ou non autorisé';
+            err.textContent = t('auth.invalidToken');
             setTimeout(() => err.textContent = '', 3000);
         }
     });
@@ -70,6 +70,15 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.modal-overlay').forEach(el => {
         el.addEventListener('click', (e) => { if (e.target === el) el.classList.remove('active'); });
     });
+
+    // i18n: translate the static shell now, and re-render dynamic chrome on language change
+    if (window.I18N) {
+        window.I18N.onChange(() => {
+            window.I18N.applyI18n(document);
+            if (STATE.token) { buildSidebar(); navigate(STATE.currentPage); }
+        });
+        window.I18N.applyI18n(document);
+    }
 
     // Auto-login
     tryAutoLogin();

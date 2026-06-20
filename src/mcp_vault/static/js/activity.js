@@ -24,18 +24,18 @@ const STATUS_STYLES = {
 };
 
 const TOOL_LABELS = {
-    system_health: 'Vérification santé', system_about: 'Infos service',
-    vault_create: 'Création vault', vault_list: 'Liste vaults', vault_info: 'Détails vault',
-    vault_update: 'Modification vault', vault_delete: 'Suppression vault',
-    secret_write: 'Écriture secret', secret_read: 'Lecture secret',
-    secret_list: 'Liste secrets', secret_delete: 'Suppression secret',
-    secret_types: 'Types de secrets', secret_generate_password: 'Génération mot de passe',
-    ssh_ca_setup: 'Setup SSH CA', ssh_sign_key: 'Signature clé SSH',
-    ssh_ca_public_key: 'Clé publique CA', ssh_ca_list_roles: 'Liste rôles SSH',
-    ssh_ca_role_info: 'Détails rôle SSH',
-    policy_create: 'Création policy', policy_list: 'Liste policies',
-    policy_get: 'Détails policy', policy_delete: 'Suppression policy',
-    token_update: 'Modification token', audit_log: 'Consultation audit',
+    system_health: t('activity.tool.system_health'), system_about: t('activity.tool.system_about'),
+    vault_create: t('activity.tool.vault_create'), vault_list: t('activity.tool.vault_list'), vault_info: t('activity.tool.vault_info'),
+    vault_update: t('activity.tool.vault_update'), vault_delete: t('activity.tool.vault_delete'),
+    secret_write: t('activity.tool.secret_write'), secret_read: t('activity.tool.secret_read'),
+    secret_list: t('activity.tool.secret_list'), secret_delete: t('activity.tool.secret_delete'),
+    secret_types: t('activity.tool.secret_types'), secret_generate_password: t('activity.tool.secret_generate_password'),
+    ssh_ca_setup: t('activity.tool.ssh_ca_setup'), ssh_sign_key: t('activity.tool.ssh_sign_key'),
+    ssh_ca_public_key: t('activity.tool.ssh_ca_public_key'), ssh_ca_list_roles: t('activity.tool.ssh_ca_list_roles'),
+    ssh_ca_role_info: t('activity.tool.ssh_ca_role_info'),
+    policy_create: t('activity.tool.policy_create'), policy_list: t('activity.tool.policy_list'),
+    policy_get: t('activity.tool.policy_get'), policy_delete: t('activity.tool.policy_delete'),
+    token_update: t('activity.tool.token_update'), audit_log: t('activity.tool.audit_log'),
 };
 
 let auditFilter = { category: '', status: '', client: '', vault_id: '', since: '' };
@@ -61,10 +61,10 @@ async function loadActivity() {
 
     // ── Header avec statistiques ──
     html += '<div class="flex-between" style="margin-bottom:1rem">';
-    html += '<h2 style="color:var(--accent)">📊 Journal d\'audit</h2>';
+    html += `<h2 style="color:var(--accent)">📊 ${t('activity.title')}</h2>`;
     html += '<div style="display:flex;gap:0.5rem;align-items:center">';
-    html += `<span class="badge badge-info">${data.total_in_buffer || 0} événements</span>`;
-    html += `<button class="btn btn-sm btn-ghost" onclick="toggleAuditRefresh()" id="btnAutoRefresh" title="Auto-refresh">🔄 Auto</button>`;
+    html += `<span class="badge badge-info">${t('activity.eventsCount', {n: data.total_in_buffer || 0})}</span>`;
+    html += `<button class="btn btn-sm btn-ghost" onclick="toggleAuditRefresh()" id="btnAutoRefresh" title="${t('activity.autoRefresh')}">🔄 ${t('activity.auto')}</button>`;
     html += '</div></div>';
 
     // ── Stats cards ──
@@ -83,11 +83,11 @@ async function loadActivity() {
 
     // ── Filtres actifs ──
     html += '<div class="card" style="padding:0.6rem 1rem;margin-bottom:0.8rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">';
-    html += '<span style="color:var(--text2);font-size:0.8rem">Filtres :</span>';
+    html += `<span style="color:var(--text2);font-size:0.8rem">${t('activity.filters')}</span>`;
 
     // Category filter
     html += `<select class="audit-filter-select" onchange="filterAuditCategory(this.value)" style="padding:0.2rem 0.4rem;font-size:0.75rem;border-radius:4px;background:var(--bg);color:var(--text);border:1px solid var(--border)">`;
-    html += `<option value="">Toutes catégories</option>`;
+    html += `<option value="">${t('activity.allCategories')}</option>`;
     for (const cat of ['system', 'vault', 'secret', 'ssh', 'policy', 'token']) {
         const sel = auditFilter.category === cat ? 'selected' : '';
         html += `<option value="${cat}" ${sel}>${CATEGORY_ICONS[cat]} ${cat}</option>`;
@@ -96,7 +96,7 @@ async function loadActivity() {
 
     // Status filter
     html += `<select onchange="filterAuditStatus(this.value)" style="padding:0.2rem 0.4rem;font-size:0.75rem;border-radius:4px;background:var(--bg);color:var(--text);border:1px solid var(--border)">`;
-    html += `<option value="">Tous statuts</option>`;
+    html += `<option value="">${t('activity.allStatuses')}</option>`;
     for (const [st, info] of Object.entries(STATUS_STYLES)) {
         const sel = auditFilter.status === st ? 'selected' : '';
         html += `<option value="${st}" ${sel}>${info.icon} ${st}</option>`;
@@ -105,11 +105,11 @@ async function loadActivity() {
 
     // Quick shortcut: Alerts only
     const alertActive = auditFilter.status === 'denied' || auditFilter.status === 'error';
-    html += `<button class="btn btn-sm ${alertActive ? 'btn-danger' : 'btn-ghost'}" onclick="filterAuditAlerts()" title="Afficher uniquement denied + error" style="font-size:0.75rem;${alertActive ? 'background:#c0392b;color:white;' : ''}">🚨 Alertes</button>`;
+    html += `<button class="btn btn-sm ${alertActive ? 'btn-danger' : 'btn-ghost'}" onclick="filterAuditAlerts()" title="${t('activity.alertsTooltip')}" style="font-size:0.75rem;${alertActive ? 'background:#c0392b;color:white;' : ''}">🚨 ${t('activity.alerts')}</button>`;
 
     // Time range quick-select
     html += '<span style="color:var(--border);margin:0 0.2rem">│</span>';
-    html += '<span style="color:var(--text2);font-size:0.75rem">Période :</span>';
+    html += `<span style="color:var(--text2);font-size:0.75rem">${t('activity.period')}</span>`;
     const ranges = [
         { label: '5m', minutes: 5 },
         { label: '15m', minutes: 15 },
@@ -126,15 +126,15 @@ async function loadActivity() {
     }
 
     if (auditFilter.category || auditFilter.status || auditFilter.client || auditFilter.vault_id || auditFilter.since) {
-        html += `<button class="btn btn-sm btn-ghost" onclick="clearAuditFilters()" style="margin-left:0.3rem">✕ Reset tout</button>`;
+        html += `<button class="btn btn-sm btn-ghost" onclick="clearAuditFilters()" style="margin-left:0.3rem">✕ ${t('activity.resetAll')}</button>`;
     }
 
     // Count with alert highlight
     const deniedCount = entries.filter(e => e.status === 'denied' || e.status === 'error').length;
     html += '<span style="margin-left:auto;font-size:0.75rem">';
-    html += `<span style="color:var(--muted)">${entries.length} résultat(s)</span>`;
+    html += `<span style="color:var(--muted)">${t('activity.resultsCount', {n: entries.length})}</span>`;
     if (deniedCount > 0) {
-        html += ` <span style="color:#e74c3c;font-weight:bold">⚠️ ${deniedCount} alerte(s)</span>`;
+        html += ` <span style="color:#e74c3c;font-weight:bold">⚠️ ${t('activity.alertsCount', {n: deniedCount})}</span>`;
     }
     html += '</span>';
     html += '</div>';
@@ -143,7 +143,7 @@ async function loadActivity() {
     html += '<div class="card" style="padding:0">';
 
     if (entries.length === 0) {
-        html += '<div class="empty-state">Aucun événement d\'audit</div>';
+        html += `<div class="empty-state">${t('activity.empty')}</div>`;
     } else {
         html += '<div class="audit-timeline">';
         let lastDate = '';
@@ -171,8 +171,8 @@ async function loadActivity() {
 
             // Detail line
             const parts = [];
-            if (e.client) parts.push(`<span class="audit-tag audit-tag-client" title="Client">${esc(e.client)}</span>`);
-            if (e.vault_id) parts.push(`<span class="audit-tag audit-tag-vault" title="Vault" onclick="filterAuditVault('${esc(e.vault_id)}')">${esc(e.vault_id)}</span>`);
+            if (e.client) parts.push(`<span class="audit-tag audit-tag-client" title="${t('activity.client')}">${esc(e.client)}</span>`);
+            if (e.vault_id) parts.push(`<span class="audit-tag audit-tag-vault" title="${t('activity.vault')}" onclick="filterAuditVault('${esc(e.vault_id)}')">${esc(e.vault_id)}</span>`);
             if (e.detail) parts.push(`<span class="audit-detail-text">${esc(e.detail)}</span>`);
 
             if (parts.length > 0) {
@@ -198,8 +198,8 @@ function formatDate(dateStr) {
     if (!dateStr) return '';
     const today = new Date().toISOString().substring(0, 10);
     const yesterday = new Date(Date.now() - 86400000).toISOString().substring(0, 10);
-    if (dateStr === today) return '📅 Aujourd\'hui';
-    if (dateStr === yesterday) return '📅 Hier';
+    if (dateStr === today) return `📅 ${t('activity.today')}`;
+    if (dateStr === yesterday) return `📅 ${t('activity.yesterday')}`;
     return `📅 ${dateStr}`;
 }
 

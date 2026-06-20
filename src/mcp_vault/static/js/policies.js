@@ -17,18 +17,18 @@ async function loadPolicies() {
     const policies = data.policies || [];
 
     let html = '<div class="flex-between" style="margin-bottom:1rem">';
-    html += `<h2 style="color:var(--accent)">📋 Policies (${policies.length})</h2>`;
-    html += '<button class="btn btn-primary" onclick="openCreatePolicyModal()">+ Nouvelle policy</button>';
+    html += `<h2 style="color:var(--accent)">📋 ${t('policies.title')} (${policies.length})</h2>`;
+    html += `<button class="btn btn-primary" onclick="openCreatePolicyModal()">+ ${t('policies.newPolicy')}</button>`;
     html += '</div>';
 
     if (policies.length === 0) {
         html += '<div class="empty-state">';
-        html += '<p>Aucune policy configurée.</p>';
-        html += '<p style="font-size:0.75rem;margin-top:0.5rem;color:var(--text2)">Les policies contrôlent les outils MCP accessibles et les chemins autorisés pour chaque token.</p>';
+        html += `<p>${t('policies.emptyState')}</p>`;
+        html += `<p style="font-size:0.75rem;margin-top:0.5rem;color:var(--text2)">${t('policies.emptyHelp')}</p>`;
         html += '</div>';
     } else {
         html += '<div class="card" style="padding:0;overflow-x:auto"><table>';
-        html += '<thead><tr><th>ID</th><th>Description</th><th>Mode</th><th>Outils</th><th>Règles de chemin</th><th>Actions</th></tr></thead><tbody>';
+        html += `<thead><tr><th>${t('policies.colId')}</th><th>${t('common.description')}</th><th>${t('policies.colMode')}</th><th>${t('policies.colTools')}</th><th>${t('policies.colPathRules')}</th><th>${t('common.actions')}</th></tr></thead><tbody>`;
         for (const p of policies) {
             const mode = _getPolicyMode(p);
             const toolCount = _getPolicyToolCount(p);
@@ -39,7 +39,7 @@ async function loadPolicies() {
                 <td style="color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(p.description || '—')}</td>
                 <td>${mode.badge}</td>
                 <td>${toolCount}</td>
-                <td>${pathRulesCount > 0 ? `<span class="badge badge-info">${pathRulesCount} règle(s)</span>` : '<span style="color:var(--muted)">—</span>'}</td>
+                <td>${pathRulesCount > 0 ? `<span class="badge badge-info">${t('policies.ruleCount', {n: pathRulesCount})}</span>` : '<span style="color:var(--muted)">—</span>'}</td>
                 <td>
                     <button onclick="event.stopPropagation();deletePolicy('${esc(p.policy_id)}')" class="btn btn-danger btn-sm">🗑️</button>
                 </td>
@@ -60,21 +60,21 @@ function _getPolicyMode(policy) {
     const allowed = policy.allowed_tools || [];
     const denied = policy.denied_tools || [];
     if (allowed.length > 0 && denied.length === 0) {
-        return { badge: '<span class="badge badge-ok">✅ Allow-list</span>', mode: 'allow' };
+        return { badge: `<span class="badge badge-ok">✅ ${t('policies.allowList')}</span>`, mode: 'allow' };
     } else if (denied.length > 0 && allowed.length === 0) {
-        return { badge: '<span class="badge badge-warn">🚫 Deny-list</span>', mode: 'deny' };
+        return { badge: `<span class="badge badge-warn">🚫 ${t('policies.denyList')}</span>`, mode: 'deny' };
     } else if (allowed.length > 0 && denied.length > 0) {
-        return { badge: '<span class="badge badge-err">⚠️ Mixte</span>', mode: 'mixed' };
+        return { badge: `<span class="badge badge-err">⚠️ ${t('policies.mixed')}</span>`, mode: 'mixed' };
     }
-    return { badge: '<span class="badge" style="background:rgba(102,102,128,0.15);color:var(--muted)">Aucune restriction</span>', mode: 'none' };
+    return { badge: `<span class="badge" style="background:rgba(102,102,128,0.15);color:var(--muted)">${t('policies.noRestriction')}</span>`, mode: 'none' };
 }
 
 function _getPolicyToolCount(policy) {
     const allowed = policy.allowed_tools || [];
     const denied = policy.denied_tools || [];
-    if (allowed.length > 0) return `<span class="badge badge-ok">${allowed.length} autorisé(s)</span>`;
-    if (denied.length > 0) return `<span class="badge badge-warn">${denied.length} refusé(s)</span>`;
-    return '<span style="color:var(--muted)">Tous</span>';
+    if (allowed.length > 0) return `<span class="badge badge-ok">${t('policies.allowedCount', {n: allowed.length})}</span>`;
+    if (denied.length > 0) return `<span class="badge badge-warn">${t('policies.deniedCount', {n: denied.length})}</span>`;
+    return `<span style="color:var(--muted)">${t('policies.allTools')}</span>`;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -85,11 +85,11 @@ async function selectPolicy(policyId) {
     _selectedPolicy = policyId;
     const el = document.getElementById('policyDetail');
     if (!el) return;
-    el.innerHTML = '<div class="empty-state">Chargement…</div>';
+    el.innerHTML = `<div class="empty-state">${t('common.loading')}</div>`;
 
     const data = await api(`/policies/${policyId}`);
     if (data.status === 'error') {
-        el.innerHTML = `<div class="empty-state">Erreur : ${esc(data.message)}</div>`;
+        el.innerHTML = `<div class="empty-state">${t('common.error')} : ${esc(data.message)}</div>`;
         return;
     }
 
@@ -101,7 +101,7 @@ async function selectPolicy(policyId) {
         <div class="flex-between">
             <h2>📋 ${esc(policyId)}</h2>
             <div style="display:flex;gap:0.4rem">
-                <button class="btn btn-danger btn-sm" onclick="deletePolicy('${esc(policyId)}')">🗑️ Supprimer</button>
+                <button class="btn btn-danger btn-sm" onclick="deletePolicy('${esc(policyId)}')">🗑️ ${t('common.delete')}</button>
                 <button class="btn btn-ghost btn-sm" onclick="_selectedPolicy=null;document.getElementById('policyDetail').innerHTML=''">✕</button>
             </div>
         </div>
@@ -109,8 +109,8 @@ async function selectPolicy(policyId) {
 
     // ── Outils autorisés ──
     if (allowed.length > 0) {
-        html += '<div style="margin:0.8rem 0"><h3 style="color:var(--success);font-size:0.85rem;margin-bottom:0.4rem">✅ Outils autorisés</h3>';
-        html += '<div class="help-text">Seuls ces outils sont accessibles. Tous les autres sont bloqués.</div>';
+        html += `<div style="margin:0.8rem 0"><h3 style="color:var(--success);font-size:0.85rem;margin-bottom:0.4rem">✅ ${t('policies.allowedTools')}</h3>`;
+        html += `<div class="help-text">${t('policies.allowedToolsHelp')}</div>`;
         html += '<div style="display:flex;flex-wrap:wrap;gap:0.3rem;margin-top:0.3rem">';
         for (const t of allowed) {
             html += `<span class="badge badge-ok">${esc(t)}</span>`;
@@ -120,8 +120,8 @@ async function selectPolicy(policyId) {
 
     // ── Outils refusés ──
     if (denied.length > 0) {
-        html += '<div style="margin:0.8rem 0"><h3 style="color:var(--warning);font-size:0.85rem;margin-bottom:0.4rem">🚫 Outils refusés</h3>';
-        html += '<div class="help-text">Ces outils sont bloqués. Tous les autres restent accessibles.</div>';
+        html += `<div style="margin:0.8rem 0"><h3 style="color:var(--warning);font-size:0.85rem;margin-bottom:0.4rem">🚫 ${t('policies.deniedTools')}</h3>`;
+        html += `<div class="help-text">${t('policies.deniedToolsHelp')}</div>`;
         html += '<div style="display:flex;flex-wrap:wrap;gap:0.3rem;margin-top:0.3rem">';
         for (const t of denied) {
             html += `<span class="badge badge-warn">${esc(t)}</span>`;
@@ -130,13 +130,13 @@ async function selectPolicy(policyId) {
     }
 
     if (allowed.length === 0 && denied.length === 0) {
-        html += '<div style="margin:0.8rem 0;color:var(--muted)"><em>Aucune restriction sur les outils — tous sont accessibles.</em></div>';
+        html += `<div style="margin:0.8rem 0;color:var(--muted)"><em>${t('policies.noToolRestriction')}</em></div>`;
     }
 
     // ── Règles de chemin (path_rules) ──
     if (pathRules.length > 0) {
-        html += '<div style="margin:1rem 0"><h3 style="color:var(--accent);font-size:0.85rem;margin-bottom:0.4rem">🛤️ Règles de chemin</h3>';
-        html += '<div class="help-text">Restriction d\'accès aux secrets par chemin (patterns <code>fnmatch</code>).</div>';
+        html += `<div style="margin:1rem 0"><h3 style="color:var(--accent);font-size:0.85rem;margin-bottom:0.4rem">🛤️ ${t('policies.pathRules')}</h3>`;
+        html += `<div class="help-text">${t('policies.pathRulesHelp')}</div>`;
 
         for (const rule of pathRules) {
             html += '<div class="path-rule-card">';
@@ -153,13 +153,13 @@ async function selectPolicy(policyId) {
             const paths = rule.allowed_paths || [];
             if (paths.length > 0) {
                 html += '<div class="path-rule-paths">';
-                html += '<span style="color:var(--muted);font-size:0.72rem">Chemins autorisés :</span>';
+                html += `<span style="color:var(--muted);font-size:0.72rem">${t('policies.allowedPaths')} :</span>`;
                 for (const ap of paths) {
                     html += `<code class="path-pattern">${esc(ap)}</code>`;
                 }
                 html += '</div>';
             } else {
-                html += '<div style="font-size:0.75rem;color:var(--muted);margin-top:0.3rem"><em>Tous les chemins sont autorisés dans ce vault</em></div>';
+                html += `<div style="font-size:0.75rem;color:var(--muted);margin-top:0.3rem"><em>${t('policies.allPathsAllowed')}</em></div>`;
             }
             html += '</div>';
         }
@@ -168,8 +168,8 @@ async function selectPolicy(policyId) {
 
     // ── Métadonnées ──
     html += '<table style="margin-top:0.8rem">';
-    if (data.created_at) html += `<tr><td style="color:var(--muted);width:120px">Créé le</td><td>${fmtDate(data.created_at)}</td></tr>`;
-    if (data.created_by) html += `<tr><td style="color:var(--muted)">Créé par</td><td>${esc(data.created_by)}</td></tr>`;
+    if (data.created_at) html += `<tr><td style="color:var(--muted);width:120px">${t('policies.createdAt')}</td><td>${fmtDate(data.created_at)}</td></tr>`;
+    if (data.created_by) html += `<tr><td style="color:var(--muted)">${t('policies.createdBy')}</td><td>${esc(data.created_by)}</td></tr>`;
     html += '</table>';
 
     html += '</div>';
@@ -209,7 +209,7 @@ function _renderToolCheckboxes() {
     const categories = {};
     for (const tool of _availableTools) {
         const prefix = tool.split('_')[0];
-        const cat = { system: 'Système', vault: 'Vaults', secret: 'Secrets', ssh: 'SSH CA', policy: 'Policies', token: 'Tokens', audit: 'Audit' }[prefix] || 'Autres';
+        const cat = { system: t('policies.catSystem'), vault: t('policies.catVaults'), secret: t('policies.catSecrets'), ssh: t('policies.catSshCa'), policy: t('policies.catPolicies'), token: t('policies.catTokens'), audit: t('policies.catAudit') }[prefix] || t('policies.catOther');
         if (!categories[cat]) categories[cat] = [];
         categories[cat].push(tool);
     }
@@ -247,14 +247,14 @@ function _updateToolModeVisibility() {
     const help = document.getElementById('cpToolsHelp');
     if (label) {
         if (mode === 'allow') {
-            label.textContent = '✅ Outils autorisés';
-            help.textContent = 'Seuls les outils cochés seront accessibles. Tous les autres seront bloqués.';
+            label.textContent = '✅ ' + t('policies.allowedTools');
+            help.textContent = t('policies.allowModeHelp');
         } else if (mode === 'deny') {
-            label.textContent = '🚫 Outils refusés';
-            help.textContent = 'Les outils cochés seront bloqués. Tous les autres resteront accessibles.';
+            label.textContent = '🚫 ' + t('policies.deniedTools');
+            help.textContent = t('policies.denyModeHelp');
         } else {
-            label.textContent = 'Outils';
-            help.textContent = 'Aucune restriction — tous les outils sont accessibles.';
+            label.textContent = t('policies.toolsLabel');
+            help.textContent = t('policies.noneModeHelp');
         }
     }
     const toolsList = document.getElementById('cpToolsList');
@@ -278,16 +278,16 @@ function addPathRule() {
 
     const ruleHtml = `<div class="path-rule-form" id="pathRule_${idx}">
         <div class="path-rule-form-header">
-            <span style="font-weight:600;color:var(--accent);font-size:0.8rem">Règle #${idx + 1}</span>
+            <span style="font-weight:600;color:var(--accent);font-size:0.8rem">${t('policies.ruleNumber', {n: idx + 1})}</span>
             <button type="button" class="btn btn-ghost btn-sm" onclick="removePathRule(${idx})" style="padding:0.1rem 0.4rem">✕</button>
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label>Pattern vault <span class="help-icon" title="Pattern fnmatch pour le vault_id (ex: production-*, *, my-vault)">ⓘ</span></label>
-                <input type="text" id="pr_vault_${idx}" placeholder="ex: production-* ou *" value="*">
+                <label>${t('policies.vaultPattern')} <span class="help-icon" title="${t('policies.vaultPatternHint')}">ⓘ</span></label>
+                <input type="text" id="pr_vault_${idx}" placeholder="${t('policies.vaultPatternPlaceholder')}" value="*">
             </div>
             <div class="form-group">
-                <label>Permissions</label>
+                <label>${t('policies.permissions')}</label>
                 <div class="checkbox-group">
                     <label><input type="checkbox" id="pr_perm_read_${idx}" checked> read</label>
                     <label><input type="checkbox" id="pr_perm_write_${idx}"> write</label>
@@ -296,9 +296,9 @@ function addPathRule() {
             </div>
         </div>
         <div class="form-group">
-            <label>Chemins autorisés <span class="help-icon" title="Patterns fnmatch séparés par des virgules. Ex: shared/*, config/public/**&#10;Si vide = tous les chemins autorisés dans ce vault.">ⓘ</span></label>
-            <input type="text" id="pr_paths_${idx}" placeholder="ex: shared/*, config/public/** (vide = tous)">
-            <div class="help-text" style="margin-top:0.2rem">Patterns <code>fnmatch</code> : <code>*</code> = un niveau, <code>**</code> = récursif</div>
+            <label>${t('policies.allowedPaths')} <span class="help-icon" title="${t('policies.allowedPathsHint')}">ⓘ</span></label>
+            <input type="text" id="pr_paths_${idx}" placeholder="${t('policies.allowedPathsPlaceholder')}">
+            <div class="help-text" style="margin-top:0.2rem">${t('policies.fnmatchHelp')}</div>
         </div>
     </div>`;
 
@@ -313,7 +313,7 @@ function removePathRule(idx) {
 /* ─── Sauvegarder la policy ─── */
 async function doCreatePolicy() {
     const policyId = document.getElementById('cpPolicyId').value.trim();
-    if (!policyId) { alert('L\'identifiant de la policy est requis'); return; }
+    if (!policyId) { alert(t('policies.policyIdRequired')); return; }
 
     const mode = document.getElementById('cpMode').value;
     const description = document.getElementById('cpDescription').value.trim();
@@ -340,7 +340,7 @@ async function doCreatePolicy() {
         _selectedPolicy = policyId;
         loadPolicies();
     } else {
-        alert('Erreur : ' + (data.message || 'Échec de la création'));
+        alert(t('common.error') + ' : ' + (data.message || t('policies.createFailed')));
     }
 }
 
@@ -372,7 +372,7 @@ function _collectPathRules() {
 
 /* ─── Supprimer une policy ─── */
 async function deletePolicy(policyId) {
-    if (!confirm(`Supprimer la policy "${policyId}" ? Les tokens utilisant cette policy ne seront plus restreints.`)) return;
+    if (!confirm(t('policies.confirmDelete', {id: policyId}))) return;
     await api(`/policies/${policyId}`, { method: 'DELETE' });
     if (_selectedPolicy === policyId) {
         _selectedPolicy = null;
@@ -393,7 +393,7 @@ async function loadPolicyOptions(selectId) {
     // Garder la valeur actuelle
     const currentValue = select.value;
 
-    let html = '<option value="">— Aucune policy —</option>';
+    let html = `<option value="">${t('policies.noPolicyOption')}</option>`;
 
     try {
         const data = await api('/policies');

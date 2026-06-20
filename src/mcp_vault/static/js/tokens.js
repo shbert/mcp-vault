@@ -9,21 +9,21 @@ async function loadTokens() {
     const tokens = data.tokens || [];
 
     let html = '<div class="flex-between" style="margin-bottom:1rem">';
-    html += '<h2 style="color:var(--accent)">🔑 Tokens d\'accès</h2>';
-    html += '<button class="btn btn-primary" onclick="openCreateTokenModal()">+ Nouveau token</button>';
+    html += `<h2 style="color:var(--accent)">🔑 ${t('tokens.title')}</h2>`;
+    html += `<button class="btn btn-primary" onclick="openCreateTokenModal()">+ ${t('tokens.newToken')}</button>`;
     html += '</div>';
 
     html += '<div id="newTokenResult"></div>';
 
     if (tokens.length === 0) {
-        html += '<div class="empty-state">Aucun token configuré</div>';
+        html += `<div class="empty-state">${t('tokens.emptyState')}</div>`;
     } else {
         html += '<div class="card" style="padding:0;overflow-x:auto"><table>';
-        html += '<thead><tr><th>Client</th><th>Permissions</th><th>Vaults</th><th>Policy</th><th>Créé le</th><th>Hash</th><th>Statut</th><th>Actions</th></tr></thead><tbody>';
+        html += `<thead><tr><th>${t('tokens.colClient')}</th><th>${t('tokens.colPermissions')}</th><th>${t('tokens.colVaults')}</th><th>${t('tokens.colPolicy')}</th><th>${t('tokens.colCreatedAt')}</th><th>${t('tokens.colHash')}</th><th>${t('common.status')}</th><th>${t('common.actions')}</th></tr></thead><tbody>`;
         for (const t of tokens) {
             const policyBadge = t.policy_id
-                ? `<span class="badge badge-info" title="Policy : ${esc(t.policy_id)}" style="cursor:pointer" onclick="event.stopPropagation();navigate('policies');setTimeout(()=>selectPolicy('${esc(t.policy_id)}'),300)">${esc(t.policy_id)}</span>`
-                : '<span style="color:var(--muted);font-size:0.75rem">aucune</span>';
+                ? `<span class="badge badge-info" title="${window.I18N.t('tokens.policyTooltip', {id: esc(t.policy_id)})}" style="cursor:pointer" onclick="event.stopPropagation();navigate('policies');setTimeout(()=>selectPolicy('${esc(t.policy_id)}'),300)">${esc(t.policy_id)}</span>`
+                : `<span style="color:var(--muted);font-size:0.75rem">${window.I18N.t('tokens.policyNone')}</span>`;
 
             // Dates formatées
             const createdAt = t.created_at ? new Date(t.created_at).toLocaleDateString('fr-FR', {day:'2-digit',month:'2-digit',year:'numeric'}) : '';
@@ -33,23 +33,23 @@ async function loadTokens() {
             let statusHtml;
             if (t.revoked) {
                 const revokedAt = t.revoked_at ? new Date(t.revoked_at).toLocaleDateString('fr-FR', {day:'2-digit',month:'2-digit',year:'numeric'}) : '';
-                statusHtml = `<span class="badge badge-err">révoqué</span>${revokedAt ? `<br><span style="color:var(--muted);font-size:0.68rem">${revokedAt}</span>` : ''}`;
+                statusHtml = `<span class="badge badge-err">${window.I18N.t('tokens.statusRevoked')}</span>${revokedAt ? `<br><span style="color:var(--muted);font-size:0.68rem">${revokedAt}</span>` : ''}`;
             } else if (t.expired) {
                 const expiresAt = t.expires_at ? new Date(t.expires_at).toLocaleDateString('fr-FR', {day:'2-digit',month:'2-digit',year:'numeric'}) : '';
-                statusHtml = `<span class="badge badge-warn" title="Token expiré — connexions refusées">expiré</span>${expiresAt ? `<br><span style="color:var(--muted);font-size:0.68rem">${expiresAt}</span>` : ''}`;
+                statusHtml = `<span class="badge badge-warn" title="${window.I18N.t('tokens.statusExpiredTooltip')}">${window.I18N.t('tokens.statusExpired')}</span>${expiresAt ? `<br><span style="color:var(--muted);font-size:0.68rem">${expiresAt}</span>` : ''}`;
             } else {
-                statusHtml = '<span class="badge badge-ok">actif</span>';
+                statusHtml = `<span class="badge badge-ok">${window.I18N.t('tokens.statusActive')}</span>`;
             }
 
             html += `<tr>
                 <td><strong>${esc(t.client_name)}</strong>${t.email ? `<br><span style="color:var(--muted);font-size:0.75rem">${esc(t.email)}</span>` : ''}</td>
                 <td>${(t.permissions||[]).map(p => `<span class="badge ${p==='admin'?'badge-warn':p==='write'?'badge-info':'badge-ok'}">${p}</span>`).join(' ')}</td>
-                <td>${t.allowed_resources && t.allowed_resources.length ? t.allowed_resources.map(r => `<code style="font-size:0.75rem">${esc(r)}</code>`).join(', ') : '<span style="color:var(--muted);font-size:0.75rem" title="Accès uniquement aux vaults créés par ce token">owner</span>'}</td>
+                <td>${t.allowed_resources && t.allowed_resources.length ? t.allowed_resources.map(r => `<code style="font-size:0.75rem">${esc(r)}</code>`).join(', ') : `<span style="color:var(--muted);font-size:0.75rem" title="${window.I18N.t('tokens.ownerTooltip')}">owner</span>`}</td>
                 <td>${policyBadge}</td>
                 <td><span style="font-size:0.78rem">${createdAt}</span>${createdTime ? `<br><span style="color:var(--muted);font-size:0.68rem">${createdTime}</span>` : ''}</td>
                 <td><code style="font-size:0.75rem">${esc(t.hash_prefix || '')}…</code></td>
                 <td>${statusHtml}</td>
-                <td>${!t.revoked ? `<button onclick="openEditToken('${esc(t.hash_prefix)}', ${JSON.stringify(t.permissions||[]).replace(/"/g,'&quot;')}, '${esc((t.allowed_resources||[]).join(", "))}', '${esc(t.policy_id||"")}')" class="btn btn-sm" style="margin-right:0.3rem" title="Modifier">✏️</button><button onclick="revokeToken('${esc(t.hash_prefix)}')" class="btn btn-danger btn-sm" title="Révoquer">🗑️</button>` : ''}</td>
+                <td>${!t.revoked ? `<button onclick="openEditToken('${esc(t.hash_prefix)}', ${JSON.stringify(t.permissions||[]).replace(/"/g,'&quot;')}, '${esc((t.allowed_resources||[]).join(", "))}', '${esc(t.policy_id||"")}')" class="btn btn-sm" style="margin-right:0.3rem" title="${window.I18N.t('common.edit')}">✏️</button><button onclick="revokeToken('${esc(t.hash_prefix)}')" class="btn btn-danger btn-sm" title="${window.I18N.t('tokens.revoke')}">🗑️</button>` : ''}</td>
             </tr>`;
         }
         html += '</tbody></table></div>';
@@ -98,7 +98,7 @@ async function doCreateToken() {
         body.policy_id = policyId;
     }
 
-    if (!body.client_name) { alert('Nom du client requis'); return; }
+    if (!body.client_name) { alert(t('tokens.clientNameRequired')); return; }
 
     const data = await api('/tokens', { method: 'POST', body: JSON.stringify(body) });
     closeModal('modalCreateToken');
@@ -110,16 +110,16 @@ async function doCreateToken() {
         const el = document.getElementById('newTokenResult');
         if (el) {
             el.innerHTML = `<div class="card" style="border-color:var(--accent)">
-                <h2>✅ Token créé pour "${esc(body.client_name)}"</h2>
-                <p style="color:var(--danger);font-size:0.8rem">⚠️ Ce token ne sera affiché qu'<strong>une seule fois</strong>. Copiez-le maintenant.</p>
+                <h2>✅ ${t('tokens.createdFor', {name: esc(body.client_name)})}</h2>
+                <p style="color:var(--danger);font-size:0.8rem">⚠️ ${t('tokens.shownOnceWarning')}</p>
                 <div class="token-display">
                     <span id="newTokenValue">${esc(data.raw_token)}</span>
-                    <button class="copy-btn" onclick="copyNewToken()">📋 Copier</button>
+                    <button class="copy-btn" onclick="copyNewToken()">📋 ${t('common.copy')}</button>
                 </div>
                 <div style="margin-top:0.6rem;font-size:0.78rem;color:var(--text2)">
-                    <span>🔑 Hash : <code>${esc(data.hash ? data.hash.substring(0,12) : '')}…</code></span>
-                    ${data.expires_at ? `<span style="margin-left:1rem">📅 Expire : ${new Date(data.expires_at).toLocaleDateString('fr-FR')}</span>` : '<span style="margin-left:1rem">📅 Expire : jamais</span>'}
-                    ${policyId ? `<span style="margin-left:1rem">📋 Policy : <strong>${esc(policyId)}</strong></span>` : ''}
+                    <span>🔑 ${t('tokens.hashLabel')} : <code>${esc(data.hash ? data.hash.substring(0,12) : '')}…</code></span>
+                    ${data.expires_at ? `<span style="margin-left:1rem">📅 ${t('tokens.expiresLabel')} : ${new Date(data.expires_at).toLocaleDateString('fr-FR')}</span>` : `<span style="margin-left:1rem">📅 ${t('tokens.expiresLabel')} : ${t('tokens.expiresNever')}</span>`}
+                    ${policyId ? `<span style="margin-left:1rem">📋 ${t('tokens.policyLabel')} : <strong>${esc(policyId)}</strong></span>` : ''}
                 </div>
             </div>`;
             // Scroll vers le token affiché
@@ -129,7 +129,7 @@ async function doCreateToken() {
 }
 
 async function revokeToken(hashPrefix) {
-    if (!confirm(`Révoquer le token ${hashPrefix}… ? Irréversible.`)) return;
+    if (!confirm(t('tokens.revokeConfirm', {prefix: hashPrefix}))) return;
     await api(`/tokens/${hashPrefix}`, { method: 'DELETE' });
     loadTokens();
 }
@@ -139,7 +139,7 @@ function copyNewToken() {
     if (!el) return;
     navigator.clipboard.writeText(el.textContent).then(() => {
         const btn = el.parentElement.querySelector('.copy-btn');
-        if (btn) { btn.textContent = '✅ Copié !'; setTimeout(() => btn.textContent = '📋 Copier', 2000); }
+        if (btn) { btn.textContent = '✅ ' + t('common.copied'); setTimeout(() => btn.textContent = '📋 ' + t('common.copy'), 2000); }
     });
 }
 
@@ -173,7 +173,7 @@ async function openEditToken(hashPrefix, permissions, vaults, policyId) {
             if (!found) {
                 const opt = document.createElement('option');
                 opt.value = policyId;
-                opt.textContent = policyId + ' (actuelle)';
+                opt.textContent = policyId + ' ' + t('tokens.policyCurrentSuffix');
                 etPolicySelect.appendChild(opt);
             }
         }
@@ -214,6 +214,6 @@ async function doUpdateToken() {
     if (data.status === 'updated') {
         loadTokens();
     } else {
-        alert('Erreur: ' + (data.message || 'Échec de la mise à jour'));
+        alert(t('common.error') + ': ' + (data.message || t('tokens.updateFailed')));
     }
 }
