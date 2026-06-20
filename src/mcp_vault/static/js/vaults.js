@@ -12,143 +12,143 @@ let _selectedVault = null;
 
 const SECRET_TYPE_FIELDS = {
     login: {
-        icon: '🔑', label: 'Identifiants',
-        desc: 'Login + mot de passe + URL',
+        icon: '🔑', get label() { return t('vaults.type.login.label'); },
+        get desc() { return t('vaults.type.login.desc'); },
         fields: [
-            { name: 'username', label: 'Nom d\'utilisateur', required: true, placeholder: 'admin@example.com' },
-            { name: 'password', label: 'Mot de passe', required: true, inputType: 'password', canGenerate: true },
+            { name: 'username', get label() { return t('vaults.field.username'); }, required: true, placeholder: 'admin@example.com' },
+            { name: 'password', get label() { return t('vaults.field.password'); }, required: true, inputType: 'password', canGenerate: true },
             { name: 'url', label: 'URL', placeholder: 'https://app.example.com' },
-            { name: 'totp_secret', label: 'Secret TOTP', placeholder: 'JBSWY3DPEHPK3PXP' },
-            { name: 'notes', label: 'Notes', inputType: 'textarea' },
+            { name: 'totp_secret', get label() { return t('vaults.field.totpSecret'); }, placeholder: 'JBSWY3DPEHPK3PXP' },
+            { name: 'notes', get label() { return t('vaults.field.notes'); }, inputType: 'textarea' },
         ]
     },
     password: {
-        icon: '🔒', label: 'Mot de passe',
-        desc: 'Mot de passe simple',
+        icon: '🔒', get label() { return t('vaults.type.password.label'); },
+        get desc() { return t('vaults.type.password.desc'); },
         fields: [
-            { name: 'password', label: 'Mot de passe', required: true, inputType: 'password', canGenerate: true },
-            { name: 'notes', label: 'Notes', inputType: 'textarea' },
+            { name: 'password', get label() { return t('vaults.field.password'); }, required: true, inputType: 'password', canGenerate: true },
+            { name: 'notes', get label() { return t('vaults.field.notes'); }, inputType: 'textarea' },
         ]
     },
     secure_note: {
-        icon: '📝', label: 'Note sécurisée',
-        desc: 'Texte libre chiffré',
+        icon: '📝', get label() { return t('vaults.type.secureNote.label'); },
+        get desc() { return t('vaults.type.secureNote.desc'); },
         fields: [
-            { name: 'title', label: 'Titre', placeholder: 'Ma note confidentielle' },
-            { name: 'content', label: 'Contenu', required: true, inputType: 'textarea', placeholder: 'Texte libre chiffré…' },
-            { name: 'notes', label: 'Notes', inputType: 'textarea' },
+            { name: 'title', get label() { return t('vaults.field.title'); }, get placeholder() { return t('vaults.ph.confidentialNote'); } },
+            { name: 'content', get label() { return t('vaults.field.content'); }, required: true, inputType: 'textarea', get placeholder() { return t('vaults.ph.encryptedFreeText'); } },
+            { name: 'notes', get label() { return t('vaults.field.notes'); }, inputType: 'textarea' },
         ]
     },
     api_key: {
-        icon: '🔌', label: 'Clé API',
-        desc: 'REST, GraphQL, services cloud',
+        icon: '🔌', get label() { return t('vaults.type.apiKey.label'); },
+        get desc() { return t('vaults.type.apiKey.desc'); },
         fields: [
-            { name: 'key', label: 'Clé API', required: true, placeholder: 'sk-abc123…' },
-            { name: 'secret', label: 'Secret', inputType: 'password', placeholder: 'Secret associé (optionnel)' },
+            { name: 'key', get label() { return t('vaults.field.apiKey'); }, required: true, placeholder: 'sk-abc123…' },
+            { name: 'secret', get label() { return t('vaults.field.secret'); }, inputType: 'password', get placeholder() { return t('vaults.ph.associatedSecret'); } },
             { name: 'endpoint', label: 'Endpoint', placeholder: 'https://api.example.com/v1' },
-            { name: 'notes', label: 'Notes', inputType: 'textarea' },
+            { name: 'notes', get label() { return t('vaults.field.notes'); }, inputType: 'textarea' },
         ]
     },
     ssh_key: {
-        icon: '🗝️', label: 'Clé SSH',
-        desc: 'Paire de clés SSH',
+        icon: '🗝️', get label() { return t('vaults.type.sshKey.label'); },
+        get desc() { return t('vaults.type.sshKey.desc'); },
         fields: [
-            { name: 'private_key', label: 'Clé privée', required: true, inputType: 'textarea', placeholder: '-----BEGIN OPENSSH PRIVATE KEY-----' },
-            { name: 'public_key', label: 'Clé publique', inputType: 'textarea', placeholder: 'ssh-ed25519 AAAA…' },
+            { name: 'private_key', get label() { return t('vaults.field.privateKey'); }, required: true, inputType: 'textarea', placeholder: '-----BEGIN OPENSSH PRIVATE KEY-----' },
+            { name: 'public_key', get label() { return t('vaults.field.publicKey'); }, inputType: 'textarea', placeholder: 'ssh-ed25519 AAAA…' },
             { name: 'passphrase', label: 'Passphrase', inputType: 'password' },
-            { name: 'notes', label: 'Notes', inputType: 'textarea' },
+            { name: 'notes', get label() { return t('vaults.field.notes'); }, inputType: 'textarea' },
         ]
     },
     database: {
-        icon: '🗄️', label: 'Base de données',
-        desc: 'Connexion PostgreSQL, MySQL, etc.',
+        icon: '🗄️', get label() { return t('vaults.type.database.label'); },
+        get desc() { return t('vaults.type.database.desc'); },
         fields: [
-            { name: 'host', label: 'Hôte', required: true, placeholder: 'db.example.com' },
+            { name: 'host', get label() { return t('vaults.field.host'); }, required: true, placeholder: 'db.example.com' },
             { name: 'port', label: 'Port', placeholder: '5432', half: true },
-            { name: 'database', label: 'Base de données', placeholder: 'mydb', half: true },
-            { name: 'username', label: 'Utilisateur', required: true, placeholder: 'postgres' },
-            { name: 'password', label: 'Mot de passe', required: true, inputType: 'password', canGenerate: true },
-            { name: 'connection_string', label: 'Chaîne de connexion', placeholder: 'postgresql://user:pass@host:5432/db' },
-            { name: 'notes', label: 'Notes', inputType: 'textarea' },
+            { name: 'database', get label() { return t('vaults.field.database'); }, placeholder: 'mydb', half: true },
+            { name: 'username', get label() { return t('vaults.field.user'); }, required: true, placeholder: 'postgres' },
+            { name: 'password', get label() { return t('vaults.field.password'); }, required: true, inputType: 'password', canGenerate: true },
+            { name: 'connection_string', get label() { return t('vaults.field.connectionString'); }, placeholder: 'postgresql://user:pass@host:5432/db' },
+            { name: 'notes', get label() { return t('vaults.field.notes'); }, inputType: 'textarea' },
         ]
     },
     server: {
-        icon: '🖥️', label: 'Serveur',
-        desc: 'Accès SSH, RDP, etc.',
+        icon: '🖥️', get label() { return t('vaults.type.server.label'); },
+        get desc() { return t('vaults.type.server.desc'); },
         fields: [
-            { name: 'host', label: 'Hôte', required: true, placeholder: '192.168.1.100' },
+            { name: 'host', get label() { return t('vaults.field.host'); }, required: true, placeholder: '192.168.1.100' },
             { name: 'port', label: 'Port', placeholder: '22', half: true },
-            { name: 'username', label: 'Utilisateur', required: true, placeholder: 'root' },
-            { name: 'password', label: 'Mot de passe', inputType: 'password', canGenerate: true },
-            { name: 'private_key', label: 'Clé privée SSH', inputType: 'textarea', placeholder: '-----BEGIN OPENSSH PRIVATE KEY-----' },
-            { name: 'notes', label: 'Notes', inputType: 'textarea' },
+            { name: 'username', get label() { return t('vaults.field.user'); }, required: true, placeholder: 'root' },
+            { name: 'password', get label() { return t('vaults.field.password'); }, inputType: 'password', canGenerate: true },
+            { name: 'private_key', get label() { return t('vaults.field.sshPrivateKey'); }, inputType: 'textarea', placeholder: '-----BEGIN OPENSSH PRIVATE KEY-----' },
+            { name: 'notes', get label() { return t('vaults.field.notes'); }, inputType: 'textarea' },
         ]
     },
     certificate: {
-        icon: '📜', label: 'Certificat TLS/SSL',
-        desc: 'Certificat + clé privée',
+        icon: '📜', get label() { return t('vaults.type.certificate.label'); },
+        get desc() { return t('vaults.type.certificate.desc'); },
         fields: [
-            { name: 'certificate', label: 'Certificat (PEM)', required: true, inputType: 'textarea', placeholder: '-----BEGIN CERTIFICATE-----' },
-            { name: 'private_key', label: 'Clé privée (PEM)', required: true, inputType: 'textarea', placeholder: '-----BEGIN PRIVATE KEY-----' },
-            { name: 'chain', label: 'Chaîne CA (intermédiaires)', inputType: 'textarea', placeholder: '-----BEGIN CERTIFICATE-----' },
-            { name: 'expiry', label: 'Date d\'expiration', placeholder: '2027-12-31' },
-            { name: 'notes', label: 'Notes', inputType: 'textarea' },
+            { name: 'certificate', get label() { return t('vaults.field.certificatePem'); }, required: true, inputType: 'textarea', placeholder: '-----BEGIN CERTIFICATE-----' },
+            { name: 'private_key', get label() { return t('vaults.field.privateKeyPem'); }, required: true, inputType: 'textarea', placeholder: '-----BEGIN PRIVATE KEY-----' },
+            { name: 'chain', get label() { return t('vaults.field.caChain'); }, inputType: 'textarea', placeholder: '-----BEGIN CERTIFICATE-----' },
+            { name: 'expiry', get label() { return t('vaults.field.expiryDate'); }, placeholder: '2027-12-31' },
+            { name: 'notes', get label() { return t('vaults.field.notes'); }, inputType: 'textarea' },
         ]
     },
     env_file: {
-        icon: '📄', label: 'Fichier .env',
-        desc: 'Variables d\'environnement',
+        icon: '📄', get label() { return t('vaults.type.envFile.label'); },
+        get desc() { return t('vaults.type.envFile.desc'); },
         fields: [
-            { name: 'content', label: 'Contenu', required: true, inputType: 'textarea', placeholder: 'DB_HOST=localhost\nDB_PORT=5432\nSECRET_KEY=abc123' },
-            { name: 'notes', label: 'Notes', inputType: 'textarea' },
+            { name: 'content', get label() { return t('vaults.field.content'); }, required: true, inputType: 'textarea', placeholder: 'DB_HOST=localhost\nDB_PORT=5432\nSECRET_KEY=abc123' },
+            { name: 'notes', get label() { return t('vaults.field.notes'); }, inputType: 'textarea' },
         ]
     },
     credit_card: {
-        icon: '💳', label: 'Carte bancaire',
-        desc: 'Numéro, expiration, CVV',
+        icon: '💳', get label() { return t('vaults.type.creditCard.label'); },
+        get desc() { return t('vaults.type.creditCard.desc'); },
         fields: [
-            { name: 'number', label: 'Numéro de carte', required: true, placeholder: '4111 1111 1111 1111' },
-            { name: 'expiry', label: 'Expiration', required: true, placeholder: '12/28', half: true },
+            { name: 'number', get label() { return t('vaults.field.cardNumber'); }, required: true, placeholder: '4111 1111 1111 1111' },
+            { name: 'expiry', get label() { return t('vaults.field.expiry'); }, required: true, placeholder: '12/28', half: true },
             { name: 'cvv', label: 'CVV', required: true, inputType: 'password', placeholder: '•••', half: true },
-            { name: 'cardholder', label: 'Titulaire', placeholder: 'JEAN DUPONT' },
-            { name: 'notes', label: 'Notes', inputType: 'textarea' },
+            { name: 'cardholder', get label() { return t('vaults.field.cardholder'); }, placeholder: 'JEAN DUPONT' },
+            { name: 'notes', get label() { return t('vaults.field.notes'); }, inputType: 'textarea' },
         ]
     },
     identity: {
-        icon: '👤', label: 'Identité',
-        desc: 'Nom, email, téléphone, adresse',
+        icon: '👤', get label() { return t('vaults.type.identity.label'); },
+        get desc() { return t('vaults.type.identity.desc'); },
         fields: [
-            { name: 'name', label: 'Nom complet', required: true, placeholder: 'Jean Dupont' },
+            { name: 'name', get label() { return t('vaults.field.fullName'); }, required: true, placeholder: 'Jean Dupont' },
             { name: 'email', label: 'Email', placeholder: 'jean@example.com', half: true },
-            { name: 'phone', label: 'Téléphone', placeholder: '+33 6 12 34 56 78', half: true },
-            { name: 'company', label: 'Entreprise', placeholder: 'Cloud Temple' },
-            { name: 'address', label: 'Adresse', inputType: 'textarea', placeholder: '1 rue de la Paix\n75001 Paris' },
-            { name: 'notes', label: 'Notes', inputType: 'textarea' },
+            { name: 'phone', get label() { return t('vaults.field.phone'); }, placeholder: '+33 6 12 34 56 78', half: true },
+            { name: 'company', get label() { return t('vaults.field.company'); }, placeholder: 'Cloud Temple' },
+            { name: 'address', get label() { return t('vaults.field.address'); }, inputType: 'textarea', placeholder: '1 rue de la Paix\n75001 Paris' },
+            { name: 'notes', get label() { return t('vaults.field.notes'); }, inputType: 'textarea' },
         ]
     },
     wifi: {
-        icon: '📶', label: 'Réseau Wi-Fi',
-        desc: 'SSID + mot de passe',
+        icon: '📶', get label() { return t('vaults.type.wifi.label'); },
+        get desc() { return t('vaults.type.wifi.desc'); },
         fields: [
-            { name: 'ssid', label: 'Nom du réseau (SSID)', required: true, placeholder: 'MonWifi-5G' },
-            { name: 'password', label: 'Mot de passe Wi-Fi', required: true, inputType: 'password', canGenerate: true },
-            { name: 'security_type', label: 'Type de sécurité', placeholder: 'WPA2-PSK' },
-            { name: 'notes', label: 'Notes', inputType: 'textarea' },
+            { name: 'ssid', get label() { return t('vaults.field.ssid'); }, required: true, placeholder: 'MonWifi-5G' },
+            { name: 'password', get label() { return t('vaults.field.wifiPassword'); }, required: true, inputType: 'password', canGenerate: true },
+            { name: 'security_type', get label() { return t('vaults.field.securityType'); }, placeholder: 'WPA2-PSK' },
+            { name: 'notes', get label() { return t('vaults.field.notes'); }, inputType: 'textarea' },
         ]
     },
     crypto_wallet: {
-        icon: '₿', label: 'Wallet crypto',
-        desc: 'Seed phrase, clé privée, adresse',
+        icon: '₿', get label() { return t('vaults.type.cryptoWallet.label'); },
+        get desc() { return t('vaults.type.cryptoWallet.desc'); },
         fields: [
-            { name: 'address', label: 'Adresse du wallet', placeholder: '0xAbC123… ou bc1q…' },
-            { name: 'private_key', label: 'Clé privée', inputType: 'password' },
-            { name: 'seed_phrase', label: 'Seed phrase (12/24 mots)', inputType: 'textarea', placeholder: 'abandon ability able about above absent…' },
-            { name: 'notes', label: 'Notes', inputType: 'textarea' },
+            { name: 'address', get label() { return t('vaults.field.walletAddress'); }, placeholder: '0xAbC123… ou bc1q…' },
+            { name: 'private_key', get label() { return t('vaults.field.privateKey'); }, inputType: 'password' },
+            { name: 'seed_phrase', get label() { return t('vaults.field.seedPhrase'); }, inputType: 'textarea', placeholder: 'abandon ability able about above absent…' },
+            { name: 'notes', get label() { return t('vaults.field.notes'); }, inputType: 'textarea' },
         ]
     },
     custom: {
-        icon: '⚙️', label: 'Personnalisé',
-        desc: 'Champs libres (JSON)',
+        icon: '⚙️', get label() { return t('vaults.type.custom.label'); },
+        get desc() { return t('vaults.type.custom.desc'); },
         fields: null  // mode JSON libre
     }
 };
@@ -167,9 +167,9 @@ function renderSecretFields(type) {
     // Type custom → textarea JSON
     if (!schema || !schema.fields) {
         container.innerHTML = `
-            <div class="type-hint"><span class="type-hint-icon">⚙️</span> Champs libres — saisissez vos données en JSON</div>
+            <div class="type-hint"><span class="type-hint-icon">⚙️</span> ${t('vaults.customHint')}</div>
             <div class="form-group">
-                <label for="wsData">Données (JSON)</label>
+                <label for="wsData">${t('vaults.dataJson')}</label>
                 <textarea id="wsData" rows="6" class="mono-textarea">{\n  "key": "value"\n}</textarea>
             </div>`;
         return;
@@ -217,8 +217,8 @@ function _renderField(field) {
             <label for="${id}">${field.label}${req}</label>
             <div class="input-with-actions">
                 <input type="password" id="${id}" placeholder="${ph || '••••••••'}"${field.required ? ' required' : ''}>
-                <button type="button" class="btn-field-action" onclick="togglePasswordVisibility('${id}')" title="Afficher / masquer">👁️</button>
-                ${field.canGenerate ? `<button type="button" class="btn-field-action btn-generate" onclick="generatePasswordFor('${id}')" title="Générer un mot de passe sécurisé (24 car.)">🎲</button>` : ''}
+                <button type="button" class="btn-field-action" onclick="togglePasswordVisibility('${id}')" title="${t('vaults.showHide')}">👁️</button>
+                ${field.canGenerate ? `<button type="button" class="btn-field-action btn-generate" onclick="generatePasswordFor('${id}')" title="${t('vaults.generatePassword')}">🎲</button>` : ''}
             </div>
         </div>`;
     }
@@ -283,22 +283,22 @@ async function loadVaults() {
     const vaults = data.vaults || [];
 
     let html = '<div class="flex-between" style="margin-bottom:1rem">';
-    html += `<h2 style="color:var(--accent)">🗄️ Vaults (${vaults.length})</h2>`;
-    if (canWrite()) html += `<button class="btn btn-primary" onclick="openModal('modalCreateVault')">+ Nouveau vault</button>`;
+    html += `<h2 style="color:var(--accent)">🗄️ ${t('vaults.title')} (${vaults.length})</h2>`;
+    if (canWrite()) html += `<button class="btn btn-primary" onclick="openModal('modalCreateVault')">+ ${t('vaults.newVault')}</button>`;
     html += '</div>';
 
     if (vaults.length === 0) {
-        html += '<div class="empty-state">Aucun vault. Créez-en un pour commencer.</div>';
+        html += `<div class="empty-state">${t('vaults.emptyState')}</div>`;
     } else {
         // Vue tableau pour mieux afficher les colonnes
         html += '<div class="card" style="padding:0;overflow-x:auto"><table>';
-        html += '<thead><tr><th>Vault</th><th>Description</th><th>Secrets</th><th>Owner</th><th>Créé le</th></tr></thead><tbody>';
+        html += `<thead><tr><th>${t('vaults.colVault')}</th><th>${t('common.description')}</th><th>${t('vaults.colSecrets')}</th><th>${t('vaults.colOwner')}</th><th>${t('vaults.colCreatedAt')}</th></tr></thead><tbody>`;
         for (const v of vaults) {
             const isOwner = v.created_by === STATE.clientName;
             const ownerBadge = v.created_by
                 ? (isOwner
-                    ? `<span class="badge badge-ok" title="Vous êtes le propriétaire">👤 ${esc(v.created_by)}</span>`
-                    : `<span class="badge" style="background:rgba(52,152,219,0.15);color:#3498db" title="Vault partagé avec vous">👥 ${esc(v.created_by)}</span>`)
+                    ? `<span class="badge badge-ok" title="${t('vaults.ownerTooltip')}">👤 ${esc(v.created_by)}</span>`
+                    : `<span class="badge" style="background:rgba(52,152,219,0.15);color:#3498db" title="${t('vaults.sharedTooltip')}">👥 ${esc(v.created_by)}</span>`)
                 : '<span style="color:var(--muted)">—</span>';
 
             html += `<tr style="cursor:pointer" onclick="selectVault('${esc(v.vault_id)}')">
@@ -324,10 +324,10 @@ async function selectVault(vaultId) {
     _selectedVault = vaultId;
     const el = document.getElementById('vaultDetail');
     if (!el) return;
-    el.innerHTML = '<div class="empty-state">Chargement…</div>';
+    el.innerHTML = `<div class="empty-state">${t('common.loading')}</div>`;
 
     const data = await api(`/vaults/${vaultId}`);
-    if (data.status === 'error') { el.innerHTML = `<div class="empty-state">Erreur : ${esc(data.message)}</div>`; return; }
+    if (data.status === 'error') { el.innerHTML = `<div class="empty-state">${t('common.error')} : ${esc(data.message)}</div>`; return; }
 
     const keys = data.secret_keys || [];
     const roles = data.ssh_ca_roles || [];
@@ -336,26 +336,26 @@ async function selectVault(vaultId) {
         <div class="flex-between">
             <h2>📁 ${esc(vaultId)}</h2>
             <div style="display:flex;gap:0.4rem">`;
-    if (canWrite()) html += `<button class="btn btn-ghost btn-sm" onclick="promptUpdateVault('${esc(vaultId)}')">✏️ Modifier</button>`;
-    if (isAdmin()) html += `<button class="btn btn-danger btn-sm" onclick="promptDeleteVault('${esc(vaultId)}')">🗑️ Supprimer</button>`;
+    if (canWrite()) html += `<button class="btn btn-ghost btn-sm" onclick="promptUpdateVault('${esc(vaultId)}')">✏️ ${t('common.edit')}</button>`;
+    if (isAdmin()) html += `<button class="btn btn-danger btn-sm" onclick="promptDeleteVault('${esc(vaultId)}')">🗑️ ${t('common.delete')}</button>`;
     html += `<button class="btn btn-ghost btn-sm" onclick="_selectedVault=null;document.getElementById('vaultDetail').innerHTML=''">✕</button>
             </div>
         </div>
         ${data.description ? `<p style="color:var(--text2);margin:0.5rem 0">${esc(data.description)}</p>` : ''}
         <table style="margin-bottom:0.8rem">
-            <tr><td style="color:var(--muted);width:120px">Secrets</td><td>${data.secrets_count || 0}</td></tr>
-            <tr><td style="color:var(--muted)">Créé par</td><td>${esc(data.created_by || '—')}</td></tr>
-            <tr><td style="color:var(--muted)">Créé le</td><td>${fmtDate(data.created_at)}</td></tr>
-            <tr><td style="color:var(--muted)">Modifié</td><td>${fmtDate(data.updated_at)}</td></tr>
+            <tr><td style="color:var(--muted);width:120px">${t('vaults.secrets')}</td><td>${data.secrets_count || 0}</td></tr>
+            <tr><td style="color:var(--muted)">${t('vaults.createdBy')}</td><td>${esc(data.created_by || '—')}</td></tr>
+            <tr><td style="color:var(--muted)">${t('vaults.createdAt')}</td><td>${fmtDate(data.created_at)}</td></tr>
+            <tr><td style="color:var(--muted)">${t('common.updated')}</td><td>${fmtDate(data.updated_at)}</td></tr>
             ${roles.length > 0 ? `<tr><td style="color:var(--muted)">SSH CA</td><td>${roles.map(r => `<span class="badge badge-info">${esc(r)}</span>`).join(' ')}</td></tr>` : ''}
         </table>`;
 
     // SSH CA section
     html += '<div class="flex-between mt-1"><h2>🔏 SSH Certificate Authority</h2>';
     if (canWrite()) html += `<div style="display:flex;gap:0.3rem">
-        <button class="btn btn-ghost btn-sm" onclick="promptSshSetup('${esc(vaultId)}')">+ Ajouter un rôle</button>
-        ${data.has_ssh_ca ? `<button class="btn btn-ghost btn-sm" onclick="showCaKey('${esc(vaultId)}')">🔑 Clé publique CA</button>` : ''}
-        ${data.has_ssh_ca ? `<button class="btn btn-primary btn-sm" onclick="promptSshSign('${esc(vaultId)}')">✍️ Signer une clé</button>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="promptSshSetup('${esc(vaultId)}')">+ ${t('vaults.addRole')}</button>
+        ${data.has_ssh_ca ? `<button class="btn btn-ghost btn-sm" onclick="showCaKey('${esc(vaultId)}')">🔑 ${t('vaults.caPublicKey')}</button>` : ''}
+        ${data.has_ssh_ca ? `<button class="btn btn-primary btn-sm" onclick="promptSshSign('${esc(vaultId)}')">✍️ ${t('vaults.signKey')}</button>` : ''}
     </div>`;
     html += '</div>';
 
@@ -364,24 +364,24 @@ async function selectVault(vaultId) {
         for (const r of roles) {
             html += `<div class="secret-item" onclick="showRoleInfo('${esc(vaultId)}','${esc(r)}','ri_${esc(r)}')">
                 <span>🔏</span><code>${esc(r)}</code>
-                <span style="color:var(--muted);font-size:0.75rem;margin-left:auto">Cliquer pour détails</span>
+                <span style="color:var(--muted);font-size:0.75rem;margin-left:auto">${t('vaults.clickForDetails')}</span>
             </div>
             <div id="ri_${esc(r)}" class="hidden"></div>`;
         }
         html += '</div>';
     } else {
-        html += '<div class="empty-state" style="padding:0.8rem"><p>Aucun rôle SSH CA configuré.</p><p style="font-size:0.72rem;color:var(--muted)">Cliquez « + Ajouter un rôle » pour créer une CA et un premier rôle.</p></div>';
+        html += `<div class="empty-state" style="padding:0.8rem"><p>${t('vaults.noSshRoles')}</p><p style="font-size:0.72rem;color:var(--muted)">${t('vaults.noSshRolesHelp')}</p></div>`;
     }
 
     html += '<div id="sshCaKeyDisplay"></div>';
 
     // Secrets section
     html += '<div class="flex-between mt-1"><h2>🔐 Secrets</h2>';
-    if (canWrite()) html += `<button class="btn btn-primary btn-sm" onclick="promptWriteSecret('${esc(vaultId)}')">+ Ajouter</button>`;
+    if (canWrite()) html += `<button class="btn btn-primary btn-sm" onclick="promptWriteSecret('${esc(vaultId)}')">+ ${t('vaults.add')}</button>`;
     html += '</div>';
 
     if (keys.length === 0) {
-        html += '<div class="empty-state" style="padding:1rem">Aucun secret</div>';
+        html += `<div class="empty-state" style="padding:1rem">${t('vaults.noSecrets')}</div>`;
     } else {
         html += '<div id="secretsList">';
         for (const k of keys) {
@@ -405,12 +405,12 @@ async function toggleSecret(vaultId, secretPath, elId) {
     if (!el) return;
     if (!el.classList.contains('hidden')) { el.classList.add('hidden'); return; }
 
-    el.innerHTML = '<div class="secret-detail">Chargement…</div>';
+    el.innerHTML = `<div class="secret-detail">${t('common.loading')}</div>`;
     el.classList.remove('hidden');
 
     const data = await api(`/vaults/${vaultId}/secrets/${secretPath}`);
     if (data.status !== 'ok') {
-        el.innerHTML = `<div class="secret-detail" style="color:var(--danger)">Erreur : ${esc(data.message)}</div>`;
+        el.innerHTML = `<div class="secret-detail" style="color:var(--danger)">${t('common.error')} : ${esc(data.message)}</div>`;
         return;
     }
 
@@ -421,7 +421,7 @@ async function toggleSecret(vaultId, secretPath, elId) {
     });
 
     el.innerHTML = `<div class="secret-detail">
-        <div style="margin-bottom:0.4rem;font-size:0.7rem;color:var(--muted)">Version ${data.version} — ${fmtDate(data.created_time)}</div>
+        <div style="margin-bottom:0.4rem;font-size:0.7rem;color:var(--muted)">${t('common.version')} ${data.version} — ${fmtDate(data.created_time)}</div>
         ${lines.join('\n')}
     </div>`;
 }
@@ -439,7 +439,7 @@ async function doCreateVault() {
         _selectedVault = vaultId;
         loadVaults();
     } else {
-        alert(`Erreur : ${result.message || 'Échec création'}`);
+        alert(`${t('common.error')} : ${result.message || t('vaults.createFailed')}`);
     }
     document.getElementById('cvVaultId').value = '';
     document.getElementById('cvDescription').value = '';
@@ -447,7 +447,7 @@ async function doCreateVault() {
 
 /* ─── Update vault ─── */
 function promptUpdateVault(vaultId) {
-    const desc = prompt(`Nouvelle description pour "${vaultId}" :`);
+    const desc = prompt(t('vaults.newDescriptionPrompt', {id: vaultId}));
     if (desc === null) return;
     api(`/vaults/${vaultId}`, { method: 'PUT', body: JSON.stringify({ description: desc }) })
         .then(() => selectVault(vaultId));
@@ -455,7 +455,7 @@ function promptUpdateVault(vaultId) {
 
 /* ─── Delete vault ─── */
 function promptDeleteVault(vaultId) {
-    if (!confirm(`⚠️ Supprimer le vault "${vaultId}" et TOUS ses secrets ? Cette action est irréversible.`)) return;
+    if (!confirm(`⚠️ ${t('vaults.confirmDeleteVault', {id: vaultId})}`)) return;
     api(`/vaults/${vaultId}`, { method: 'DELETE' }).then(() => {
         _selectedVault = null;
         loadVaults();
@@ -478,7 +478,7 @@ async function doWriteSecret() {
     const type = document.getElementById('wsType').value;
 
     if (!path) {
-        alert('Le chemin est requis');
+        alert(t('vaults.pathRequired'));
         document.getElementById('wsPath').focus();
         return;
     }
@@ -491,7 +491,7 @@ async function doWriteSecret() {
         try {
             data = JSON.parse(document.getElementById('wsData').value);
         } catch {
-            alert('JSON invalide dans les données');
+            alert(t('vaults.invalidJson'));
             return;
         }
     } else {
@@ -504,14 +504,14 @@ async function doWriteSecret() {
             if (val) {
                 data[field.name] = val;
             } else if (field.required) {
-                alert(`Le champ « ${field.label} » est requis`);
+                alert(t('vaults.fieldRequired', {field: field.label}));
                 if (el) el.focus();
                 return;
             }
         }
 
         if (Object.keys(data).length === 0) {
-            alert('Remplissez au moins un champ');
+            alert(t('vaults.fillAtLeastOne'));
             return;
         }
     }
@@ -525,13 +525,13 @@ async function doWriteSecret() {
     if (result.status === 'ok') {
         selectVault(vaultId);
     } else {
-        alert(`Erreur : ${result.message || 'Échec écriture'}`);
+        alert(`${t('common.error')} : ${result.message || t('vaults.writeFailed')}`);
     }
 }
 
 /* ─── Delete secret ─── */
 function promptDeleteSecret(vaultId, path) {
-    if (!confirm(`Supprimer le secret "${path}" ? Irréversible.`)) return;
+    if (!confirm(t('vaults.confirmDeleteSecret', {path: path}))) return;
     api(`/vaults/${vaultId}/secrets/${path}`, { method: 'DELETE' }).then(() => selectVault(vaultId));
 }
 
@@ -553,7 +553,7 @@ function promptSshSetup(vaultId) {
 async function doSshSetup() {
     const vaultId = document.getElementById('ssVaultId').value;
     const roleName = document.getElementById('ssRoleName').value.trim();
-    if (!roleName) { alert('Le nom du rôle est requis'); return; }
+    if (!roleName) { alert(t('vaults.roleNameRequired')); return; }
 
     const body = {
         role_name: roleName,
@@ -570,7 +570,7 @@ async function doSshSetup() {
     if (data.status === 'ok') {
         selectVault(vaultId);
     } else {
-        alert('Erreur : ' + (data.message || 'Échec du setup SSH CA'));
+        alert(t('common.error') + ' : ' + (data.message || t('vaults.sshSetupFailed')));
     }
 }
 
@@ -601,11 +601,11 @@ async function doSshSign() {
     const publicKey = document.getElementById('sgPublicKey').value.trim();
     const ttl = document.getElementById('sgTtl').value.trim() || '30m';
 
-    if (!publicKey) { alert('Collez votre clé publique SSH'); return; }
-    if (!roleName) { alert('Sélectionnez un rôle SSH'); return; }
+    if (!publicKey) { alert(t('vaults.pastePublicKey')); return; }
+    if (!roleName) { alert(t('vaults.selectSshRole')); return; }
 
     const resultEl = document.getElementById('sgResult');
-    resultEl.innerHTML = '<div class="empty-state">Signature en cours…</div>';
+    resultEl.innerHTML = `<div class="empty-state">${t('vaults.signing')}</div>`;
 
     const data = await api(`/vaults/${vaultId}/ssh/sign`, {
         method: 'POST', body: JSON.stringify({ role_name: roleName, public_key: publicKey, ttl: ttl })
@@ -613,17 +613,17 @@ async function doSshSign() {
 
     if (data.status === 'ok') {
         resultEl.innerHTML = `<div class="card" style="border-color:var(--success);margin-top:0.8rem">
-            <h2 style="color:var(--success)">✅ Certificat signé</h2>
-            <p style="font-size:0.75rem;color:var(--text2)">Serial : ${esc(data.serial_number || '—')} — TTL : ${esc(data.ttl || ttl)}</p>
+            <h2 style="color:var(--success)">✅ ${t('vaults.certificateSigned')}</h2>
+            <p style="font-size:0.75rem;color:var(--text2)">${t('vaults.serial')} : ${esc(data.serial_number || '—')} — TTL : ${esc(data.ttl || ttl)}</p>
             <div class="token-display" style="border-color:var(--success)">
                 <span id="signedKeyValue">${esc(data.signed_key || '')}</span>
                 <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('signedKeyValue').textContent)">📋</button>
             </div>
-            <div class="help-text">Sauvegardez ce certificat dans un fichier (ex: id_ed25519-cert.pub) et utilisez-le avec <code>ssh -i id_ed25519 -o CertificateFile=id_ed25519-cert.pub user@host</code></div>
+            <div class="help-text">${t('vaults.signedKeyHelp')} <code>ssh -i id_ed25519 -o CertificateFile=id_ed25519-cert.pub user@host</code></div>
         </div>`;
     } else {
         resultEl.innerHTML = `<div class="card" style="border-color:var(--danger);margin-top:0.8rem">
-            <p style="color:var(--danger)">❌ Erreur : ${esc(data.message || 'Échec de la signature')}</p>
+            <p style="color:var(--danger)">❌ ${t('common.error')} : ${esc(data.message || t('vaults.signFailed'))}</p>
         </div>`;
     }
 }
@@ -641,15 +641,15 @@ async function showCaKey(vaultId) {
     const data = await api(`/vaults/${vaultId}/ssh/ca-key`);
     if (data.status === 'ok') {
         el.innerHTML = `<div class="card mt-1" style="border-color:var(--accent)">
-            <h2>🔑 Clé publique CA SSH</h2>
+            <h2>🔑 ${t('vaults.caPublicKeyTitle')}</h2>
             <div class="token-display">
                 <span id="caKeyValue">${esc(data.public_key || '')}</span>
                 <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('caKeyValue').textContent)">📋</button>
             </div>
-            <div class="help-text">${esc(data.usage || 'Ajouter dans TrustedUserCAKeys sur les serveurs cibles')}</div>
+            <div class="help-text">${esc(data.usage || t('vaults.caKeyUsage'))}</div>
         </div>`;
     } else {
-        el.innerHTML = `<div class="card mt-1"><p style="color:var(--danger)">Erreur : ${esc(data.message)}</p></div>`;
+        el.innerHTML = `<div class="card mt-1"><p style="color:var(--danger)">${t('common.error')} : ${esc(data.message)}</p></div>`;
     }
 }
 
@@ -659,12 +659,12 @@ async function showRoleInfo(vaultId, roleName, elId) {
     if (!el) return;
     if (!el.classList.contains('hidden')) { el.classList.add('hidden'); return; }
 
-    el.innerHTML = '<div class="secret-detail">Chargement…</div>';
+    el.innerHTML = `<div class="secret-detail">${t('common.loading')}</div>`;
     el.classList.remove('hidden');
 
     const data = await api(`/vaults/${vaultId}/ssh/roles/${roleName}`);
     if (data.status !== 'ok') {
-        el.innerHTML = `<div class="secret-detail" style="color:var(--danger)">Erreur : ${esc(data.message)}</div>`;
+        el.innerHTML = `<div class="secret-detail" style="color:var(--danger)">${t('common.error')} : ${esc(data.message)}</div>`;
         return;
     }
 

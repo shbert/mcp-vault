@@ -13,14 +13,17 @@
     <div class="login-card">
         <img src="/admin/static/img/logo-cloudtemple.svg" alt="Cloud Temple" class="login-logo">
         <h2>MCP Vault</h2>
-        <p class="login-subtitle">Gestion sécurisée des secrets pour agents IA</p>
+        <select class="lang-select" onchange="window.I18N.setLang(this.value)" aria-label="Language">
+          <option value="en">EN</option><option value="de">DE</option><option value="fr">FR</option>
+        </select>
+        <p class="login-subtitle" data-i18n="auth.subtitle">Gestion sécurisée des secrets pour agents IA</p>
         <form class="login-form" id="loginForm">
-            <label for="loginToken">🔑 Token d'accès</label>
-            <input type="password" id="loginToken" placeholder="Collez votre token ici…" autocomplete="off" autofocus>
+            <label for="loginToken">🔑 <span data-i18n="auth.tokenLabel">Token d'accès</span></label>
+            <input type="password" id="loginToken" data-i18n-placeholder="auth.tokenPlaceholder" placeholder="Collez votre token ici…" autocomplete="off" autofocus>
             <div class="login-error" id="loginError"></div>
-            <button type="submit">Se connecter</button>
+            <button type="submit" data-i18n="auth.signIn">Se connecter</button>
         </form>
-        <p class="login-hint">Contactez votre administrateur pour obtenir un token.</p>
+        <p class="login-hint" data-i18n="auth.hint">Contactez votre administrateur pour obtenir un token.</p>
     </div>
 </div>
 
@@ -37,14 +40,17 @@
         <div class="header-right">
             <span id="headerUser"></span>
             <span id="headerVersion"></span>
-            <button class="btn-logout" onclick="logout()" title="Déconnexion">🔓</button>
+            <select class="lang-select" onchange="window.I18N.setLang(this.value)" aria-label="Language">
+              <option value="en">EN</option><option value="de">DE</option><option value="fr">FR</option>
+            </select>
+            <button class="btn-logout" onclick="logout()" data-i18n-title="header.logout" title="Déconnexion">🔓</button>
         </div>
     </div>
 
     <!-- Sidebar + Content -->
     <div class="app-layout">
         <div class="sidebar">
-            <div class="sidebar-title">Navigation</div>
+            <div class="sidebar-title" data-i18n="nav.title">Navigation</div>
             <div class="sidebar-nav" id="sidebarNav"></div>
         </div>
         <div class="main-content">
@@ -61,18 +67,18 @@
 <!-- ═══════════════ MODAL — Créer vault ═══════════════ -->
 <div id="modalCreateVault" class="modal-overlay">
     <div class="modal">
-        <h2>🗄️ Nouveau vault</h2>
+        <h2>🗄️ <span data-i18n="vaultModal.title">Nouveau vault</span></h2>
         <div class="form-group">
-            <label for="cvVaultId">Identifiant du vault *</label>
-            <input type="text" id="cvVaultId" placeholder="ex: serveurs-prod">
+            <label for="cvVaultId" data-i18n="vaultModal.idLabel">Identifiant du vault *</label>
+            <input type="text" id="cvVaultId" data-i18n-placeholder="vaultModal.idPlaceholder" placeholder="ex: serveurs-prod">
         </div>
         <div class="form-group">
-            <label for="cvDescription">Description</label>
-            <input type="text" id="cvDescription" placeholder="Description optionnelle">
+            <label for="cvDescription" data-i18n="vaultModal.description">Description</label>
+            <input type="text" id="cvDescription" data-i18n-placeholder="vaultModal.descPlaceholder" placeholder="Description optionnelle">
         </div>
         <div class="modal-actions">
-            <button class="btn btn-ghost" onclick="closeModal('modalCreateVault')">Annuler</button>
-            <button class="btn btn-primary" onclick="doCreateVault()">Créer</button>
+            <button class="btn btn-ghost" onclick="closeModal('modalCreateVault')" data-i18n="common.cancel">Annuler</button>
+            <button class="btn btn-primary" onclick="doCreateVault()" data-i18n="common.create">Créer</button>
         </div>
     </div>
 </div>
@@ -80,38 +86,38 @@
 <!-- ═══════════════ MODAL — Écrire secret (formulaire dynamique) ═══════════════ -->
 <div id="modalWriteSecret" class="modal-overlay">
     <div class="modal modal-lg">
-        <h2>🔐 Nouveau secret</h2>
+        <h2>🔐 <span data-i18n="secretModal.title">Nouveau secret</span></h2>
         <input type="hidden" id="wsVaultId">
         <div class="form-row">
             <div class="form-group">
-                <label for="wsPath">Chemin <span class="field-required">*</span></label>
-                <input type="text" id="wsPath" placeholder="ex: db/postgres-prod">
+                <label for="wsPath"><span data-i18n="secretModal.path">Chemin</span> <span class="field-required" data-i18n="common.required">*</span></label>
+                <input type="text" id="wsPath" data-i18n-placeholder="secretModal.pathPlaceholder" placeholder="ex: db/postgres-prod">
             </div>
             <div class="form-group">
-                <label for="wsType">Type de secret</label>
+                <label for="wsType" data-i18n="secretModal.type">Type de secret</label>
                 <select id="wsType" onchange="renderSecretFields(this.value)">
-                    <option value="login">🔑 Identifiants</option>
-                    <option value="password">🔒 Mot de passe</option>
-                    <option value="api_key">🔌 Clé API</option>
-                    <option value="database">🗄️ Base de données</option>
-                    <option value="server">🖥️ Serveur</option>
-                    <option value="ssh_key">🗝️ Clé SSH</option>
-                    <option value="certificate">📜 Certificat TLS</option>
-                    <option value="env_file">📄 Fichier .env</option>
-                    <option value="secure_note">📝 Note sécurisée</option>
-                    <option value="credit_card">💳 Carte bancaire</option>
-                    <option value="identity">👤 Identité</option>
-                    <option value="wifi">📶 Wi-Fi</option>
-                    <option value="crypto_wallet">₿ Wallet crypto</option>
-                    <option value="custom">⚙️ Personnalisé (JSON)</option>
+                    <option value="login">🔑 <span data-i18n="secretType.login">Identifiants</span></option>
+                    <option value="password">🔒 <span data-i18n="secretType.password">Mot de passe</span></option>
+                    <option value="api_key">🔌 <span data-i18n="secretType.api_key">Clé API</span></option>
+                    <option value="database">🗄️ <span data-i18n="secretType.database">Base de données</span></option>
+                    <option value="server">🖥️ <span data-i18n="secretType.server">Serveur</span></option>
+                    <option value="ssh_key">🗝️ <span data-i18n="secretType.ssh_key">Clé SSH</span></option>
+                    <option value="certificate">📜 <span data-i18n="secretType.certificate">Certificat TLS</span></option>
+                    <option value="env_file">📄 <span data-i18n="secretType.env_file">Fichier .env</span></option>
+                    <option value="secure_note">📝 <span data-i18n="secretType.secure_note">Note sécurisée</span></option>
+                    <option value="credit_card">💳 <span data-i18n="secretType.credit_card">Carte bancaire</span></option>
+                    <option value="identity">👤 <span data-i18n="secretType.identity">Identité</span></option>
+                    <option value="wifi">📶 <span data-i18n="secretType.wifi">Wi-Fi</span></option>
+                    <option value="crypto_wallet">₿ <span data-i18n="secretType.crypto_wallet">Wallet crypto</span></option>
+                    <option value="custom">⚙️ <span data-i18n="secretType.custom">Personnalisé (JSON)</span></option>
                 </select>
             </div>
         </div>
         <!-- Conteneur dynamique : les champs changent selon le type sélectionné -->
         <div id="wsFields"></div>
         <div class="modal-actions">
-            <button class="btn btn-ghost" onclick="closeModal('modalWriteSecret')">Annuler</button>
-            <button class="btn btn-primary" onclick="doWriteSecret()">💾 Enregistrer</button>
+            <button class="btn btn-ghost" onclick="closeModal('modalWriteSecret')" data-i18n="common.cancel">Annuler</button>
+            <button class="btn btn-primary" onclick="doWriteSecret()">💾 <span data-i18n="common.save">Enregistrer</span></button>
         </div>
     </div>
 </div>
@@ -119,46 +125,46 @@
 <!-- ═══════════════ MODAL — Créer token ═══════════════ -->
 <div id="modalCreateToken" class="modal-overlay">
     <div class="modal">
-        <h2>🔑 Nouveau token</h2>
+        <h2>🔑 <span data-i18n="tokenModal.createTitle">Nouveau token</span></h2>
         <div class="form-group">
-            <label for="ctName">Nom du client <span class="field-required">*</span></label>
+            <label for="ctName"><span data-i18n="tokenModal.clientName">Nom du client</span> <span class="field-required" data-i18n="common.required">*</span></label>
             <input type="text" id="ctName" placeholder="ex: mcp-agent-sre">
-            <div class="help-text">Identifiant unique de l'agent ou de l'utilisateur qui utilisera ce token.</div>
+            <div class="help-text" data-i18n="tokenModal.clientNameHelp">Identifiant unique de l'agent ou de l'utilisateur qui utilisera ce token.</div>
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label for="ctEmail">Email</label>
+                <label for="ctEmail" data-i18n="tokenModal.email">Email</label>
                 <input type="email" id="ctEmail" placeholder="admin@company.com">
             </div>
             <div class="form-group">
-                <label for="ctExpires">Expiration (jours)</label>
+                <label for="ctExpires" data-i18n="tokenModal.expiration">Expiration (jours)</label>
                 <input type="number" id="ctExpires" value="90" min="0">
-                <div class="help-text">0 = pas d'expiration</div>
+                <div class="help-text" data-i18n="tokenModal.expirationHelp">0 = pas d'expiration</div>
             </div>
         </div>
         <div class="form-group">
-            <label>Permissions <span class="help-icon" title="read = lecture seule&#10;write = lecture + écriture de secrets et vaults&#10;admin = accès total (tokens, policies, suppression)">ⓘ</span></label>
+            <label><span data-i18n="tokenModal.permissions">Permissions</span> <span class="help-icon" data-i18n-title="tokenModal.permissionsTip" title="read = lecture seule&#10;write = lecture + écriture de secrets et vaults&#10;admin = accès total (tokens, policies, suppression)">ⓘ</span></label>
             <div class="checkbox-group">
-                <label title="Accès en lecture aux vaults et secrets autorisés"><input type="checkbox" checked disabled> read</label>
-                <label title="Création de vaults, écriture et suppression de secrets"><input type="checkbox" id="ctPermWrite"> write</label>
-                <label title="Gestion des tokens, policies, suppression de vaults — accès total"><input type="checkbox" id="ctPermAdmin"> admin</label>
+                <label data-i18n-title="tokenModal.permReadTip" title="Accès en lecture aux vaults et secrets autorisés"><input type="checkbox" checked disabled> read</label>
+                <label data-i18n-title="tokenModal.permWriteTip" title="Création de vaults, écriture et suppression de secrets"><input type="checkbox" id="ctPermWrite"> write</label>
+                <label data-i18n-title="tokenModal.permAdminTip" title="Gestion des tokens, policies, suppression de vaults — accès total"><input type="checkbox" id="ctPermAdmin"> admin</label>
             </div>
         </div>
         <div class="form-group">
-            <label for="ctVaults">Vaults autorisés <span class="help-icon" title="Liste de vault_id séparés par des virgules.&#10;Si vide : le token n'accède qu'aux vaults qu'il a créés (isolation par propriétaire).">ⓘ</span></label>
+            <label for="ctVaults"><span data-i18n="tokenModal.authorizedVaults">Vaults autorisés</span> <span class="help-icon" data-i18n-title="tokenModal.authorizedVaultsTip" title="Liste de vault_id séparés par des virgules.&#10;Si vide : le token n'accède qu'aux vaults qu'il a créés (isolation par propriétaire).">ⓘ</span></label>
             <input type="text" id="ctVaults" placeholder="vault1, vault2">
-            <div class="help-text">Vide = accès uniquement aux vaults créés par ce token (isolation owner-based)</div>
+            <div class="help-text" data-i18n="tokenModal.authorizedVaultsHelp">Vide = accès uniquement aux vaults créés par ce token (isolation owner-based)</div>
         </div>
         <div class="form-group">
-            <label for="ctPolicy">Policy <span class="help-icon" title="Associe une policy de sécurité à ce token.&#10;La policy contrôle quels outils MCP sont accessibles et quels chemins de secrets sont autorisés.&#10;Sans policy : tous les outils sont accessibles.">ⓘ</span></label>
+            <label for="ctPolicy"><span data-i18n="tokenModal.policy">Policy</span> <span class="help-icon" data-i18n-title="tokenModal.policyTip" title="Associe une policy de sécurité à ce token.&#10;La policy contrôle quels outils MCP sont accessibles et quels chemins de secrets sont autorisés.&#10;Sans policy : tous les outils sont accessibles.">ⓘ</span></label>
             <select id="ctPolicy">
-                <option value="">— Aucune policy —</option>
+                <option value="" data-i18n="tokenModal.noPolicy">— Aucune policy —</option>
             </select>
-            <div class="help-text">Contrôle les outils MCP et les chemins de secrets accessibles</div>
+            <div class="help-text" data-i18n="tokenModal.policyHelp">Contrôle les outils MCP et les chemins de secrets accessibles</div>
         </div>
         <div class="modal-actions">
-            <button class="btn btn-ghost" onclick="closeModal('modalCreateToken')">Annuler</button>
-            <button class="btn btn-primary" onclick="doCreateToken()">Créer</button>
+            <button class="btn btn-ghost" onclick="closeModal('modalCreateToken')" data-i18n="common.cancel">Annuler</button>
+            <button class="btn btn-primary" onclick="doCreateToken()" data-i18n="common.create">Créer</button>
         </div>
     </div>
 </div>
@@ -166,31 +172,31 @@
 <!-- ═══════════════ MODAL — Modifier token ═══════════════ -->
 <div id="modalEditToken" class="modal-overlay">
     <div class="modal">
-        <h2>✏️ Modifier le token</h2>
+        <h2>✏️ <span data-i18n="tokenModal.editTitle">Modifier le token</span></h2>
         <input type="hidden" id="etHashPrefix">
         <div class="form-group">
-            <label>Permissions <span class="help-icon" title="read = lecture seule&#10;write = lecture + écriture&#10;admin = accès total">ⓘ</span></label>
+            <label><span data-i18n="tokenModal.permissions">Permissions</span> <span class="help-icon" data-i18n-title="tokenModal.editPermissionsTip" title="read = lecture seule&#10;write = lecture + écriture&#10;admin = accès total">ⓘ</span></label>
             <div class="checkbox-group">
-                <label title="Accès en lecture"><input type="checkbox" id="etPermRead"> read</label>
-                <label title="Écriture de secrets et vaults"><input type="checkbox" id="etPermWrite"> write</label>
-                <label title="Accès total — tokens, policies, suppression"><input type="checkbox" id="etPermAdmin"> admin</label>
+                <label data-i18n-title="tokenModal.editPermReadTip" title="Accès en lecture"><input type="checkbox" id="etPermRead"> read</label>
+                <label data-i18n-title="tokenModal.editPermWriteTip" title="Écriture de secrets et vaults"><input type="checkbox" id="etPermWrite"> write</label>
+                <label data-i18n-title="tokenModal.editPermAdminTip" title="Accès total — tokens, policies, suppression"><input type="checkbox" id="etPermAdmin"> admin</label>
             </div>
         </div>
         <div class="form-group">
-            <label for="etVaults">Vaults autorisés <span class="help-icon" title="Vide = accès uniquement aux vaults créés par ce token">ⓘ</span></label>
+            <label for="etVaults"><span data-i18n="tokenModal.authorizedVaults">Vaults autorisés</span> <span class="help-icon" data-i18n-title="tokenModal.editAuthorizedVaultsTip" title="Vide = accès uniquement aux vaults créés par ce token">ⓘ</span></label>
             <input type="text" id="etVaults" placeholder="vault1, vault2">
-            <div class="help-text">Vide = isolation par propriétaire (owner-based)</div>
+            <div class="help-text" data-i18n="tokenModal.editAuthorizedVaultsHelp">Vide = isolation par propriétaire (owner-based)</div>
         </div>
         <div class="form-group">
-            <label for="etPolicy">Policy <span class="help-icon" title="Contrôle les outils MCP et chemins de secrets accessibles.&#10;Sélectionnez « Aucune policy » pour retirer toute restriction.">ⓘ</span></label>
+            <label for="etPolicy"><span data-i18n="tokenModal.policy">Policy</span> <span class="help-icon" data-i18n-title="tokenModal.editPolicyTip" title="Contrôle les outils MCP et chemins de secrets accessibles.&#10;Sélectionnez « Aucune policy » pour retirer toute restriction.">ⓘ</span></label>
             <select id="etPolicy">
-                <option value="">— Aucune policy —</option>
+                <option value="" data-i18n="tokenModal.noPolicy">— Aucune policy —</option>
             </select>
-            <div class="help-text">Contrôle les outils et chemins accessibles. Sélectionnez « Aucune » pour retirer.</div>
+            <div class="help-text" data-i18n="tokenModal.editPolicyHelp">Contrôle les outils et chemins accessibles. Sélectionnez « Aucune » pour retirer.</div>
         </div>
         <div class="modal-actions">
-            <button class="btn btn-ghost" onclick="closeModal('modalEditToken')">Annuler</button>
-            <button class="btn btn-primary" onclick="doUpdateToken()">💾 Enregistrer</button>
+            <button class="btn btn-ghost" onclick="closeModal('modalEditToken')" data-i18n="common.cancel">Annuler</button>
+            <button class="btn btn-primary" onclick="doUpdateToken()">💾 <span data-i18n="common.save">Enregistrer</span></button>
         </div>
     </div>
 </div>
@@ -198,45 +204,45 @@
 <!-- ═══════════════ MODAL — Créer policy ═══════════════ -->
 <div id="modalCreatePolicy" class="modal-overlay">
     <div class="modal modal-lg">
-        <h2>📋 Nouvelle policy</h2>
+        <h2>📋 <span data-i18n="policyModal.title">Nouvelle policy</span></h2>
         <div class="form-group">
-            <label for="cpPolicyId">Identifiant <span class="field-required">*</span></label>
+            <label for="cpPolicyId"><span data-i18n="policyModal.identifier">Identifiant</span> <span class="field-required" data-i18n="common.required">*</span></label>
             <input type="text" id="cpPolicyId" placeholder="ex: agent-readonly, sre-full-access">
-            <div class="help-text">Identifiant unique. Sera référencé dans les tokens.</div>
+            <div class="help-text" data-i18n="policyModal.identifierHelp">Identifiant unique. Sera référencé dans les tokens.</div>
         </div>
         <div class="form-group">
-            <label for="cpDescription">Description</label>
-            <input type="text" id="cpDescription" placeholder="ex: Accès lecture seule pour les agents de monitoring">
+            <label for="cpDescription" data-i18n="policyModal.description">Description</label>
+            <input type="text" id="cpDescription" data-i18n-placeholder="policyModal.descPlaceholder" placeholder="ex: Accès lecture seule pour les agents de monitoring">
         </div>
 
         <!-- Mode de restriction -->
         <div class="form-group">
-            <label for="cpMode">Mode de restriction <span class="help-icon" title="Allow-list : seuls les outils cochés sont autorisés&#10;Deny-list : les outils cochés sont bloqués, le reste autorisé&#10;Aucune : pas de restriction sur les outils">ⓘ</span></label>
+            <label for="cpMode"><span data-i18n="policyModal.mode">Mode de restriction</span> <span class="help-icon" data-i18n-title="policyModal.modeTip" title="Allow-list : seuls les outils cochés sont autorisés&#10;Deny-list : les outils cochés sont bloqués, le reste autorisé&#10;Aucune : pas de restriction sur les outils">ⓘ</span></label>
             <select id="cpMode" onchange="_updateToolModeVisibility()">
-                <option value="deny">🚫 Deny-list — bloquer certains outils</option>
-                <option value="allow">✅ Allow-list — n'autoriser que certains outils</option>
-                <option value="none">🔓 Aucune restriction sur les outils</option>
+                <option value="deny">🚫 <span data-i18n="policyModal.modeDeny">Deny-list — bloquer certains outils</span></option>
+                <option value="allow">✅ <span data-i18n="policyModal.modeAllow">Allow-list — n'autoriser que certains outils</span></option>
+                <option value="none">🔓 <span data-i18n="policyModal.modeNone">Aucune restriction sur les outils</span></option>
             </select>
         </div>
 
         <!-- Sélection des outils -->
         <div class="form-group">
-            <label id="cpToolsLabel">🚫 Outils refusés</label>
-            <div class="help-text" id="cpToolsHelp">Les outils cochés seront bloqués. Tous les autres resteront accessibles.</div>
+            <label id="cpToolsLabel">🚫 <span data-i18n="policyModal.toolsLabel">Outils refusés</span></label>
+            <div class="help-text" id="cpToolsHelp" data-i18n="policyModal.toolsHelp">Les outils cochés seront bloqués. Tous les autres resteront accessibles.</div>
             <div id="cpToolsList" class="tools-checklist"></div>
         </div>
 
         <!-- Règles de chemin -->
         <div class="form-group">
-            <label>🛤️ Règles de chemin (optionnel) <span class="help-icon" title="Restreint l'accès aux secrets par chemin.&#10;Utilisez des patterns fnmatch (ex: shared/*, config/**)&#10;Si aucune règle : pas de restriction par chemin.">ⓘ</span></label>
-            <div class="help-text" style="margin-bottom:0.4rem">Contrôle quels chemins de secrets sont accessibles par vault. Sans règle = tout accessible.</div>
+            <label>🛤️ <span data-i18n="policyModal.pathRules">Règles de chemin (optionnel)</span> <span class="help-icon" data-i18n-title="policyModal.pathRulesTip" title="Restreint l'accès aux secrets par chemin.&#10;Utilisez des patterns fnmatch (ex: shared/*, config/**)&#10;Si aucune règle : pas de restriction par chemin.">ⓘ</span></label>
+            <div class="help-text" style="margin-bottom:0.4rem" data-i18n="policyModal.pathRulesHelp">Contrôle quels chemins de secrets sont accessibles par vault. Sans règle = tout accessible.</div>
             <div id="cpPathRulesContainer"></div>
-            <button type="button" class="btn btn-ghost btn-sm" onclick="addPathRule()" style="margin-top:0.4rem">+ Ajouter une règle de chemin</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="addPathRule()" style="margin-top:0.4rem" data-i18n="policyModal.addPathRule">+ Ajouter une règle de chemin</button>
         </div>
 
         <div class="modal-actions">
-            <button class="btn btn-ghost" onclick="closeModal('modalCreatePolicy')">Annuler</button>
-            <button class="btn btn-primary" onclick="doCreatePolicy()">📋 Créer la policy</button>
+            <button class="btn btn-ghost" onclick="closeModal('modalCreatePolicy')" data-i18n="common.cancel">Annuler</button>
+            <button class="btn btn-primary" onclick="doCreatePolicy()">📋 <span data-i18n="policyModal.createPolicy">Créer la policy</span></button>
         </div>
     </div>
 </div>
@@ -244,28 +250,28 @@
 <!-- ═══════════════ MODAL — PKI Setup ═══════════════ -->
 <div id="modalPkiSetup" class="modal-overlay">
     <div class="modal">
-        <h2>🔐 Initialiser la PKI interne</h2>
+        <h2>🔐 <span data-i18n="pkiModal.setupTitle">Initialiser la PKI interne</span></h2>
         <div class="form-group">
-            <label for="pkiLabMode">Mode</label>
+            <label for="pkiLabMode" data-i18n="pkiModal.mode">Mode</label>
             <select id="pkiLabMode">
-                <option value="true">Lab (CA racine self-signed)</option>
-                <option value="false">Prod (CSR pour CA externe)</option>
+                <option value="true" data-i18n="pkiModal.modeLab">Lab (CA racine self-signed)</option>
+                <option value="false" data-i18n="pkiModal.modeProd">Prod (CSR pour CA externe)</option>
             </select>
-            <div class="help-text">Lab : CA racine générée localement dans OpenBao. Prod : vous devrez signer le CSR avec votre CA externe.</div>
+            <div class="help-text" data-i18n="pkiModal.modeHelp">Lab : CA racine générée localement dans OpenBao. Prod : vous devrez signer le CSR avec votre CA externe.</div>
         </div>
         <div class="form-group">
-            <label for="pkiDomains">Domaines autorisés <span class="field-required">*</span></label>
+            <label for="pkiDomains"><span data-i18n="pkiModal.allowedDomains">Domaines autorisés</span> <span class="field-required" data-i18n="common.required">*</span></label>
             <input type="text" id="pkiDomains" value="" placeholder="*.example.com, example.com">
-            <div class="help-text">Domaines pour lesquels ACME peut émettre des certificats (séparés par des virgules). Ex : *.lesur.lan, lesur.lan</div>
+            <div class="help-text" data-i18n="pkiModal.allowedDomainsHelp">Domaines pour lesquels ACME peut émettre des certificats (séparés par des virgules). Ex : *.lesur.lan, lesur.lan</div>
         </div>
         <div class="form-group">
-            <label for="pkiLeafTtl">TTL des certificats feuilles</label>
+            <label for="pkiLeafTtl" data-i18n="pkiModal.leafTtl">TTL des certificats feuilles</label>
             <input type="text" id="pkiLeafTtl" value="720h" placeholder="720h">
-            <div class="help-text">Durée de vie max des certificats émis (ex: 720h = 30 jours). Renouvellement automatique par Caddy.</div>
+            <div class="help-text" data-i18n="pkiModal.leafTtlHelp">Durée de vie max des certificats émis (ex: 720h = 30 jours). Renouvellement automatique par Caddy.</div>
         </div>
         <div class="modal-actions">
-            <button class="btn btn-ghost" onclick="closeModal('modalPkiSetup')">Annuler</button>
-            <button class="btn btn-primary" onclick="doPkiSetup()">Initialiser</button>
+            <button class="btn btn-ghost" onclick="closeModal('modalPkiSetup')" data-i18n="common.cancel">Annuler</button>
+            <button class="btn btn-primary" onclick="doPkiSetup()" data-i18n="pkiModal.initialize">Initialiser</button>
         </div>
     </div>
 </div>
@@ -273,31 +279,31 @@
 <!-- ═══════════════ MODAL — PKI Émission de certificat ═══════════════ -->
 <div id="modalPkiIssue" class="modal-overlay">
     <div class="modal">
-        <h2>📜 Générer un certificat</h2>
+        <h2>📜 <span data-i18n="pkiModal.issueTitle">Générer un certificat</span></h2>
         <div class="form-group">
-            <label for="pkiIssueCn">Common Name (FQDN) <span class="field-required">*</span></label>
+            <label for="pkiIssueCn"><span data-i18n="pkiModal.commonName">Common Name (FQDN)</span> <span class="field-required" data-i18n="common.required">*</span></label>
             <input type="text" id="pkiIssueCn" placeholder="www.cloud-temple.app">
-            <div class="help-text">Doit appartenir aux domaines autorisés de la PKI. Pas de wildcard en émission manuelle.</div>
+            <div class="help-text" data-i18n="pkiModal.commonNameHelp">Doit appartenir aux domaines autorisés de la PKI. Pas de wildcard en émission manuelle.</div>
         </div>
         <div class="form-group">
-            <label for="pkiIssueTtl">TTL</label>
+            <label for="pkiIssueTtl" data-i18n="pkiModal.ttl">TTL</label>
             <input type="text" id="pkiIssueTtl" value="720h" placeholder="720h">
-            <div class="help-text">Durée de validité (ex: 720h, 30m, 90d), bornée par le max_ttl du rôle.</div>
+            <div class="help-text" data-i18n="pkiModal.ttlHelp">Durée de validité (ex: 720h, 30m, 90d), bornée par le max_ttl du rôle.</div>
         </div>
         <div class="form-group">
-            <label for="pkiIssueAltNames">SANs DNS supplémentaires</label>
+            <label for="pkiIssueAltNames" data-i18n="pkiModal.altNames">SANs DNS supplémentaires</label>
             <input type="text" id="pkiIssueAltNames" placeholder="api.cloud-temple.app, api2.cloud-temple.app">
-            <div class="help-text">Noms DNS additionnels, séparés par des virgules (optionnel).</div>
+            <div class="help-text" data-i18n="pkiModal.altNamesHelp">Noms DNS additionnels, séparés par des virgules (optionnel).</div>
         </div>
         <div class="form-group">
-            <label for="pkiIssueIpSans">SANs IP</label>
+            <label for="pkiIssueIpSans" data-i18n="pkiModal.ipSans">SANs IP</label>
             <input type="text" id="pkiIssueIpSans" placeholder="10.0.0.4, 10.0.0.5">
-            <div class="help-text">Adresses IP, séparées par des virgules (optionnel).</div>
+            <div class="help-text" data-i18n="pkiModal.ipSansHelp">Adresses IP, séparées par des virgules (optionnel).</div>
         </div>
-        <div class="help-text">⚠️ La clé privée sera affichée une seule fois — sauvegardez-la immédiatement.</div>
+        <div class="help-text">⚠️ <span data-i18n="pkiModal.privateKeyWarning">La clé privée sera affichée une seule fois — sauvegardez-la immédiatement.</span></div>
         <div class="modal-actions">
-            <button class="btn btn-ghost" onclick="closeModal('modalPkiIssue')">Annuler</button>
-            <button class="btn btn-primary" onclick="doPkiIssue()">Générer</button>
+            <button class="btn btn-ghost" onclick="closeModal('modalPkiIssue')" data-i18n="common.cancel">Annuler</button>
+            <button class="btn btn-primary" onclick="doPkiIssue()" data-i18n="common.generate">Générer</button>
         </div>
     </div>
 </div>
@@ -305,31 +311,31 @@
 <!-- ═══════════════ MODAL — SSH CA Setup ═══════════════ -->
 <div id="modalSshSetup" class="modal-overlay">
     <div class="modal">
-        <h2>🔏 Configurer SSH CA</h2>
+        <h2>🔏 <span data-i18n="sshModal.setupTitle">Configurer SSH CA</span></h2>
         <input type="hidden" id="ssVaultId">
         <div class="form-group">
-            <label for="ssRoleName">Nom du rôle <span class="field-required">*</span></label>
+            <label for="ssRoleName"><span data-i18n="sshModal.roleName">Nom du rôle</span> <span class="field-required" data-i18n="common.required">*</span></label>
             <input type="text" id="ssRoleName" placeholder="ex: sre-deploy">
-            <div class="help-text">Identifiant du rôle SSH (ex: sre-deploy, dev-access)</div>
+            <div class="help-text" data-i18n="sshModal.roleNameHelp">Identifiant du rôle SSH (ex: sre-deploy, dev-access)</div>
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label for="ssDefaultUser">Utilisateur par défaut</label>
+                <label for="ssDefaultUser" data-i18n="sshModal.defaultUser">Utilisateur par défaut</label>
                 <input type="text" id="ssDefaultUser" value="ubuntu" placeholder="ubuntu">
             </div>
             <div class="form-group">
-                <label for="ssTtl">TTL du certificat</label>
+                <label for="ssTtl" data-i18n="sshModal.certTtl">TTL du certificat</label>
                 <input type="text" id="ssTtl" value="30m" placeholder="30m">
-                <div class="help-text">Ex: 15m, 1h, 24h</div>
+                <div class="help-text" data-i18n="sshModal.certTtlHelp">Ex: 15m, 1h, 24h</div>
             </div>
         </div>
         <div class="form-group">
-            <label for="ssAllowedUsers">Utilisateurs autorisés <span class="help-icon" title="Liste d'utilisateurs SSH séparés par des virgules.&#10;* = tous les utilisateurs autorisés.">ⓘ</span></label>
+            <label for="ssAllowedUsers"><span data-i18n="sshModal.allowedUsers">Utilisateurs autorisés</span> <span class="help-icon" data-i18n-title="sshModal.allowedUsersTip" title="Liste d'utilisateurs SSH séparés par des virgules.&#10;* = tous les utilisateurs autorisés.">ⓘ</span></label>
             <input type="text" id="ssAllowedUsers" value="*" placeholder="deploy,admin ou *">
         </div>
         <div class="modal-actions">
-            <button class="btn btn-ghost" onclick="closeModal('modalSshSetup')">Annuler</button>
-            <button class="btn btn-primary" onclick="doSshSetup()">🔏 Configurer</button>
+            <button class="btn btn-ghost" onclick="closeModal('modalSshSetup')" data-i18n="common.cancel">Annuler</button>
+            <button class="btn btn-primary" onclick="doSshSetup()">🔏 <span data-i18n="sshModal.configure">Configurer</span></button>
         </div>
     </div>
 </div>
@@ -337,32 +343,33 @@
 <!-- ═══════════════ MODAL — SSH Sign Key ═══════════════ -->
 <div id="modalSshSign" class="modal-overlay">
     <div class="modal modal-lg">
-        <h2>✍️ Signer une clé SSH</h2>
+        <h2>✍️ <span data-i18n="sshModal.signTitle">Signer une clé SSH</span></h2>
         <input type="hidden" id="sgVaultId">
         <div class="form-row">
             <div class="form-group">
-                <label for="sgRoleName">Rôle SSH <span class="field-required">*</span></label>
+                <label for="sgRoleName"><span data-i18n="sshModal.sshRole">Rôle SSH</span> <span class="field-required" data-i18n="common.required">*</span></label>
                 <select id="sgRoleName"></select>
             </div>
             <div class="form-group">
-                <label for="sgTtl">TTL du certificat</label>
+                <label for="sgTtl" data-i18n="sshModal.certTtl">TTL du certificat</label>
                 <input type="text" id="sgTtl" value="30m" placeholder="30m">
             </div>
         </div>
         <div class="form-group">
-            <label for="sgPublicKey">Clé publique SSH <span class="field-required">*</span></label>
-            <textarea id="sgPublicKey" rows="4" class="mono-textarea" placeholder="ssh-ed25519 AAAA... ou ssh-rsa AAAA..."></textarea>
-            <div class="help-text">Collez la clé publique SSH à signer (contenu de id_ed25519.pub ou id_rsa.pub)</div>
+            <label for="sgPublicKey"><span data-i18n="sshModal.publicKey">Clé publique SSH</span> <span class="field-required" data-i18n="common.required">*</span></label>
+            <textarea id="sgPublicKey" rows="4" class="mono-textarea" data-i18n-placeholder="sshModal.publicKeyPlaceholder" placeholder="ssh-ed25519 AAAA... ou ssh-rsa AAAA..."></textarea>
+            <div class="help-text" data-i18n="sshModal.publicKeyHelp">Collez la clé publique SSH à signer (contenu de id_ed25519.pub ou id_rsa.pub)</div>
         </div>
         <div id="sgResult"></div>
         <div class="modal-actions">
-            <button class="btn btn-ghost" onclick="closeModal('modalSshSign')">Fermer</button>
-            <button class="btn btn-primary" onclick="doSshSign()">✍️ Signer</button>
+            <button class="btn btn-ghost" onclick="closeModal('modalSshSign')" data-i18n="common.close">Fermer</button>
+            <button class="btn btn-primary" onclick="doSshSign()">✍️ <span data-i18n="sshModal.sign">Signer</span></button>
         </div>
     </div>
 </div>
 
 <!-- ═══════════════ SCRIPTS ═══════════════ -->
+<script src="/admin/static/js/i18n.js"></script>
 <script src="/admin/static/js/config.js"></script>
 <script src="/admin/static/js/api.js"></script>
 <script src="/admin/static/js/dashboard.js"></script>

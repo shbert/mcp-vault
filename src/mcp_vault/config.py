@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     mcp_server_host: str = "0.0.0.0"
     mcp_server_port: int = 8030
     mcp_server_debug: bool = False
+    vault_lang: str = "en"  # langue des descriptions d'outils MCP (en|de|fr), surchargeable via VAULT_LANG
 
     # --- WAF ---
     # Port externe du WAF Caddy (variable partagée avec docker-compose). Déclaré ici
@@ -39,6 +40,10 @@ class Settings(BaseSettings):
     s3_secret_access_key: str = ""
     s3_bucket_name: str = ""
     s3_region_name: str = "fr1"
+    # Force SigV4 sur le client "data" (PUT/GET/DELETE).
+    # Par défaut False → SigV2 (compat Dell ECS, comportement upstream historique).
+    # Mettre True pour les backends S3 modernes SigV4-only (MinIO, VersityGW, AWS).
+    s3_force_sigv4: bool = False
 
     # --- OpenBao ---
     openbao_addr: str = "http://127.0.0.1:8200"

@@ -29,6 +29,7 @@ function esc(s) {
 
 function fmtDate(iso) {
     if (!iso) return '—';
-    try { return new Date(iso).toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); }
+    const tag = (window.I18N && window.I18N.localeTag) ? window.I18N.localeTag() : 'fr-FR';
+    try { return new Date(iso).toLocaleDateString(tag, { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); }
     catch { return iso; }
 }

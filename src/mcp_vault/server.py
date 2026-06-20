@@ -17,6 +17,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from .config import get_settings
+from .i18n import tool_description
 
 # --- Logging ---
 logging.basicConfig(
@@ -127,7 +128,7 @@ mcp = FastMCP(
 # OUTILS MCP — System
 # ═══════════════════════════════════════════════════════════════════════
 
-@mcp.tool()
+@mcp.tool(description=tool_description("system_health", get_settings().vault_lang))
 async def system_health() -> dict:
     """
     Vérifie l'état de santé du service MCP Vault.
@@ -150,7 +151,7 @@ async def system_health() -> dict:
     }
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("system_about", get_settings().vault_lang))
 async def system_about() -> dict:
     """
     Informations sur le service MCP Vault.
@@ -174,7 +175,7 @@ async def system_about() -> dict:
 # OUTILS MCP — Vaults (coffres de secrets, mount KV v2)
 # ═══════════════════════════════════════════════════════════════════════
 
-@mcp.tool()
+@mcp.tool(description=tool_description("vault_create", get_settings().vault_lang))
 async def vault_create(vault_id: str, description: str = "") -> dict:
     """
     Crée un nouveau vault (coffre de secrets, mount KV v2 dans OpenBao).
@@ -199,7 +200,7 @@ async def vault_create(vault_id: str, description: str = "") -> dict:
     return _r("vault_create", await create_space(vault_id, description), vault_id)
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("vault_list", get_settings().vault_lang))
 async def vault_list() -> dict:
     """Liste tous les vaults (coffres de secrets) accessibles par le token courant."""
     from .auth.context import current_token_info, check_policy
@@ -229,7 +230,7 @@ async def vault_list() -> dict:
     ))
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("vault_info", get_settings().vault_lang))
 async def vault_info(vault_id: str) -> dict:
     """
     Informations détaillées sur un vault.
@@ -250,7 +251,7 @@ async def vault_info(vault_id: str) -> dict:
     return _r("vault_info", await get_space_info(vault_id), vault_id)
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("vault_update", get_settings().vault_lang))
 async def vault_update(vault_id: str, description: str = "") -> dict:
     """
     Met à jour les métadonnées d'un vault (description).
@@ -278,7 +279,7 @@ async def vault_update(vault_id: str, description: str = "") -> dict:
     return _r("vault_update", await update_space(vault_id, description), vault_id)
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("vault_delete", get_settings().vault_lang))
 async def vault_delete(vault_id: str, confirm: bool = False) -> dict:
     """
     Supprime un vault et TOUS ses secrets (irréversible).
@@ -317,7 +318,7 @@ async def vault_delete(vault_id: str, confirm: bool = False) -> dict:
 # OUTILS MCP — Secrets (KV v2)
 # ═══════════════════════════════════════════════════════════════════════
 
-@mcp.tool()
+@mcp.tool(description=tool_description("secret_write", get_settings().vault_lang))
 async def secret_write(vault_id: str, path: str, data: dict,
                        secret_type: str = "custom", tags: str = "",
                        favorite: bool = False) -> dict:
@@ -355,7 +356,7 @@ async def secret_write(vault_id: str, path: str, data: dict,
     return _r("secret_write", await write_secret(vault_id, path, data, secret_type, tags, favorite), vault_id, path)
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("secret_read", get_settings().vault_lang))
 async def secret_read(vault_id: str, path: str, version: int = 0) -> dict:
     """
     Lit un secret depuis un vault.
@@ -381,7 +382,7 @@ async def secret_read(vault_id: str, path: str, version: int = 0) -> dict:
     return _r("secret_read", await read_secret(vault_id, path, version), vault_id, path)
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("secret_list", get_settings().vault_lang))
 async def secret_list(vault_id: str, path: str = "") -> dict:
     """
     Liste les secrets d'un vault.
@@ -407,7 +408,7 @@ async def secret_list(vault_id: str, path: str = "") -> dict:
     return _r("secret_list", await list_secrets(vault_id, path), vault_id)
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("secret_delete", get_settings().vault_lang))
 async def secret_delete(vault_id: str, path: str) -> dict:
     """
     Supprime un secret et toutes ses versions.
@@ -439,7 +440,7 @@ async def secret_delete(vault_id: str, path: str) -> dict:
 # OUTILS MCP — JIT Wrap Broker (mcp-mission)
 # ═══════════════════════════════════════════════════════════════════════
 
-@mcp.tool()
+@mcp.tool(description=tool_description("secret_wrap", get_settings().vault_lang))
 async def secret_wrap(
     vault_id: str,
     secret_path: str,
@@ -505,7 +506,7 @@ async def secret_wrap(
     return result
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("secret_revoke_wrap", get_settings().vault_lang))
 async def secret_revoke_wrap(lease_id: str) -> dict:
     """
     Révoque un wrap token de façon IDEMPOTENTE.
@@ -535,7 +536,7 @@ async def secret_revoke_wrap(lease_id: str) -> dict:
     return result
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("secret_wrap_lookup", get_settings().vault_lang))
 async def secret_wrap_lookup(operation_id: str) -> dict:
     """
     Retrouve et révoque les wraps créés avec un operation_id donné.
@@ -580,7 +581,7 @@ async def secret_wrap_lookup(operation_id: str) -> dict:
 # OUTILS MCP — Consommation médiée (issue #26, anti-confused-deputy C18)
 # ═══════════════════════════════════════════════════════════════════════
 
-@mcp.tool()
+@mcp.tool(description=tool_description("secret_consume", get_settings().vault_lang))
 async def secret_consume(
     wrap_token: str,
     operation_id: str,
@@ -734,7 +735,7 @@ async def _check_mission_active(
 # OUTILS MCP — Types & Utilitaires
 # ═══════════════════════════════════════════════════════════════════════
 
-@mcp.tool()
+@mcp.tool(description=tool_description("secret_types", get_settings().vault_lang))
 async def secret_types() -> dict:
     """
     Liste tous les types de secrets disponibles (style 1Password).
@@ -749,7 +750,7 @@ async def secret_types() -> dict:
     return {"status": "ok", "types": types, "count": len(types)}
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("secret_generate_password", get_settings().vault_lang))
 async def secret_generate_password(length: int = 24, uppercase: bool = True,
                                     lowercase: bool = True, digits: bool = True,
                                     symbols: bool = True, exclude: str = "") -> dict:
@@ -785,7 +786,7 @@ async def secret_generate_password(length: int = 24, uppercase: bool = True,
 # OUTILS MCP — Policies (Phase 8a — CRUD)
 # ═══════════════════════════════════════════════════════════════════════
 
-@mcp.tool()
+@mcp.tool(description=tool_description("policy_create", get_settings().vault_lang))
 async def policy_create(policy_id: str, description: str = "",
                         allowed_tools: list = None, denied_tools: list = None,
                         path_rules: list = None) -> dict:
@@ -828,7 +829,7 @@ async def policy_create(policy_id: str, description: str = "",
     )
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("policy_list", get_settings().vault_lang))
 async def policy_list() -> dict:
     """
     Liste toutes les policies MCP.
@@ -851,7 +852,7 @@ async def policy_list() -> dict:
     return {"status": "ok", "policies": policies, "count": len(policies)}
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("policy_get", get_settings().vault_lang))
 async def policy_get(policy_id: str) -> dict:
     """
     Détails complets d'une policy MCP.
@@ -880,7 +881,7 @@ async def policy_get(policy_id: str) -> dict:
     return {"status": "ok", **policy}
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("policy_delete", get_settings().vault_lang))
 async def policy_delete(policy_id: str, confirm: bool = False) -> dict:
     """
     Supprime une policy MCP (irréversible).
@@ -920,7 +921,7 @@ async def policy_delete(policy_id: str, confirm: bool = False) -> dict:
 # OUTILS MCP — SSH CA
 # ═══════════════════════════════════════════════════════════════════════
 
-@mcp.tool()
+@mcp.tool(description=tool_description("ssh_ca_setup", get_settings().vault_lang))
 async def ssh_ca_setup(vault_id: str, role_name: str, allowed_users: str = "*",
                        default_user: str = "ubuntu", ttl: str = "30m") -> dict:
     """
@@ -949,7 +950,7 @@ async def ssh_ca_setup(vault_id: str, role_name: str, allowed_users: str = "*",
     return _r("ssh_ca_setup", await setup_ssh_ca(vault_id, role_name, allowed_users, default_user, ttl), vault_id, role_name)
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("ssh_sign_key", get_settings().vault_lang))
 async def ssh_sign_key(vault_id: str, role_name: str, public_key: str,
                        ttl: str = "30m") -> dict:
     """
@@ -977,7 +978,7 @@ async def ssh_sign_key(vault_id: str, role_name: str, public_key: str,
     return _r("ssh_sign_key", await sign_ssh_key(vault_id, role_name, public_key, ttl), vault_id, role_name)
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("ssh_ca_public_key", get_settings().vault_lang))
 async def ssh_ca_public_key(vault_id: str) -> dict:
     """
     Récupère la clé publique de la CA SSH (pour configurer les serveurs cibles).
@@ -998,7 +999,7 @@ async def ssh_ca_public_key(vault_id: str) -> dict:
     return _r("ssh_ca_public_key", await get_ca_public_key(vault_id), vault_id)
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("ssh_ca_list_roles", get_settings().vault_lang))
 async def ssh_ca_list_roles(vault_id: str) -> dict:
     """
     Liste les rôles SSH CA configurés dans un vault.
@@ -1021,7 +1022,7 @@ async def ssh_ca_list_roles(vault_id: str) -> dict:
     return _r("ssh_ca_list_roles", await list_ssh_roles(vault_id), vault_id)
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("ssh_ca_role_info", get_settings().vault_lang))
 async def ssh_ca_role_info(vault_id: str, role_name: str) -> dict:
     """
     Détails d'un rôle SSH CA (TTL, allowed_users, extensions, etc.).
@@ -1047,7 +1048,7 @@ async def ssh_ca_role_info(vault_id: str, role_name: str) -> dict:
 # OUTILS MCP — PKI Certificate Authority (Phase 5 — issue #15)
 # ═══════════════════════════════════════════════════════════════════════
 
-@mcp.tool()
+@mcp.tool(description=tool_description("pki_ca_setup", get_settings().vault_lang))
 async def pki_ca_setup(lab_mode: bool = True,
                        allowed_domains: str = "*.lesur.lan,lesur.lan",
                        leaf_ttl: str = "720h") -> dict:
@@ -1077,7 +1078,7 @@ async def pki_ca_setup(lab_mode: bool = True,
     return _r("pki_ca_setup", await setup_pki_ca(lab_mode, domains_list, leaf_ttl))
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("pki_ca_public_key", get_settings().vault_lang))
 async def pki_ca_public_key() -> dict:
     """
     Retourne la CA racine PEM avec son empreinte SHA-256 et l'URL stable.
@@ -1094,7 +1095,7 @@ async def pki_ca_public_key() -> dict:
     return _r("pki_ca_public_key", await get_ca_root_pem())
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("pki_ca_list_roles", get_settings().vault_lang))
 async def pki_ca_list_roles() -> dict:
     """Liste les rôles d'émission PKI configurés sur la CA intermédiaire."""
     from .auth.context import check_policy
@@ -1107,7 +1108,7 @@ async def pki_ca_list_roles() -> dict:
     return _r("pki_ca_list_roles", await list_pki_roles())
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("pki_ca_role_info", get_settings().vault_lang))
 async def pki_ca_role_info(role_name: str) -> dict:
     """
     Détails d'un rôle d'émission PKI (domaines autorisés, TTL, flags TLS).
@@ -1125,7 +1126,7 @@ async def pki_ca_role_info(role_name: str) -> dict:
     return _r("pki_ca_role_info", await get_pki_role_info(role_name))
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("pki_list_certs", get_settings().vault_lang))
 async def pki_list_certs(limit: int = 100, offset: int = 0) -> dict:
     """
     Inventaire paginé des certificats émis (serials, SANs, expiration, révocation).
@@ -1144,7 +1145,7 @@ async def pki_list_certs(limit: int = 100, offset: int = 0) -> dict:
     return _r("pki_list_certs", await list_issued_certs(limit, offset))
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("pki_revoke_cert", get_settings().vault_lang))
 async def pki_revoke_cert(serial_number: str) -> dict:
     """
     Révoque un certificat et force la mise à jour de la CRL.
@@ -1165,7 +1166,7 @@ async def pki_revoke_cert(serial_number: str) -> dict:
     return _r("pki_revoke_cert", await revoke_cert(serial_number))
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("pki_issue_cert", get_settings().vault_lang))
 async def pki_issue_cert(common_name: str, ttl: str = "720h",
                          alt_names: str = "", ip_sans: str = "") -> dict:
     """
@@ -1197,7 +1198,7 @@ async def pki_issue_cert(common_name: str, ttl: str = "720h",
     return result
 
 
-@mcp.tool()
+@mcp.tool(description=tool_description("pki_ca_rotate_intermediate", get_settings().vault_lang))
 async def pki_ca_rotate_intermediate(keep_old_issuer: bool = True,
                                       overlap_ttl: str = "48h") -> dict:
     """
@@ -1227,7 +1228,7 @@ async def pki_ca_rotate_intermediate(keep_old_issuer: bool = True,
 # OUTILS MCP — Token Management (Phase 8b)
 # ═══════════════════════════════════════════════════════════════════════
 
-@mcp.tool()
+@mcp.tool(description=tool_description("token_update", get_settings().vault_lang))
 async def token_update(hash_prefix: str, policy_id: str = "",
                        permissions: str = "", vaults: str = "") -> dict:
     """
@@ -1290,7 +1291,7 @@ async def token_update(hash_prefix: str, policy_id: str = "",
 # OUTILS MCP — Audit Log (Phase 8c)
 # ═══════════════════════════════════════════════════════════════════════
 
-@mcp.tool()
+@mcp.tool(description=tool_description("audit_log", get_settings().vault_lang))
 async def audit_log(limit: int = 50, client: str = "", vault_id: str = "",
                     tool: str = "", category: str = "", status: str = "",
                     since: str = "") -> dict:

@@ -4,7 +4,7 @@
 
 async function loadPki() {
     const page = document.getElementById('page-pki');
-    page.innerHTML = '<div class="loading">Chargement PKI...</div>';
+    page.innerHTML = `<div class="loading">${t('pki.loadingPki')}</div>`;
 
     const status = await api('/pki/status');
 
@@ -13,7 +13,7 @@ async function loadPki() {
         return;
     }
     if (status.status === 'error') {
-        page.innerHTML = `<div class="error-banner">Erreur PKI : ${esc(status.message)}</div>`;
+        page.innerHTML = `<div class="error-banner">${t('pki.errorPki')} ${esc(status.message)}</div>`;
         return;
     }
 
@@ -24,11 +24,11 @@ async function loadPki() {
     ]);
 
     if (certs.status === 'error') {
-        page.innerHTML = `<div class="error-banner">Erreur inventaire : ${esc(certs.message)}</div>`;
+        page.innerHTML = `<div class="error-banner">${t('pki.errorInventory')} ${esc(certs.message)}</div>`;
         return;
     }
     if (roles.status === 'error') {
-        page.innerHTML = `<div class="error-banner">Erreur rôles ACME : ${esc(roles.message)}</div>`;
+        page.innerHTML = `<div class="error-banner">${t('pki.errorAcmeRoles')} ${esc(roles.message)}</div>`;
         return;
     }
 
@@ -49,7 +49,7 @@ function _renderPkiPage(s, certs, roles, roleDetail) {
     const intExp  = s.int_expires  !== 'inconnu' ? new Date(s.int_expires)  : null;
 
     function expBadge(dt) {
-        if (!dt) return '<span class="badge badge-warn">inconnu</span>';
+        if (!dt) return `<span class="badge badge-warn">${t('pki.unknown')}</span>`;
         const days = Math.round((dt - now) / 86400000);
         const cls  = days < 30 ? 'badge-danger' : days < 90 ? 'badge-warn' : 'badge-ok';
         return `<span class="badge ${cls}">${fmtDate(dt.toISOString())} (J-${days})</span>`;
@@ -59,11 +59,11 @@ function _renderPkiPage(s, certs, roles, roleDetail) {
         const sans = (c.sans || []).join(', ') || '—';
         const exp  = c.not_after ? fmtDate(c.not_after) : '—';
         const rev  = c.revoked
-            ? '<span class="badge badge-danger">révoqué</span>'
-            : '<span class="badge badge-ok">actif</span>';
+            ? `<span class="badge badge-danger">${t('pki.revoked')}</span>`
+            : `<span class="badge badge-ok">${t('pki.active')}</span>`;
         // SÉCURITÉ : JSON.stringify évite le XSS onclick (esc() n'échappe pas les quotes simples)
         const revokeBtn = (!c.revoked && isAdmin())
-            ? `<button class="btn btn-sm btn-danger" onclick="pkiRevoke(${JSON.stringify(c.serial)})">Révoquer</button>`
+            ? `<button class="btn btn-sm btn-danger" onclick="pkiRevoke(${JSON.stringify(c.serial)})">${t('pki.revoke')}</button>`
             : '';
         return `<tr>
             <td class="mono-small">${esc(c.serial)}</td>
@@ -72,12 +72,12 @@ function _renderPkiPage(s, certs, roles, roleDetail) {
             <td>${rev}</td>
             <td>${revokeBtn}</td>
         </tr>`;
-    }).join('') || '<tr><td colspan="5" class="empty-row">Aucun certificat émis</td></tr>';
+    }).join('') || `<tr><td colspan="5" class="empty-row">${t('pki.noCertsIssued')}</td></tr>`;
 
     const actions = isAdmin()
         ? `<div class="page-header-actions">
-               <button class="btn btn-primary" onclick="openModal('modalPkiIssue')">Générer un certificat</button>
-               <button class="btn btn-warn" onclick="pkiRotate()">Rotation intermédiaire</button>
+               <button class="btn btn-primary" onclick="openModal('modalPkiIssue')">${t('pki.generateCert')}</button>
+               <button class="btn btn-warn" onclick="pkiRotate()">${t('pki.rotateIntermediate')}</button>
            </div>`
         : '';
 
@@ -90,52 +90,52 @@ function _renderPkiPage(s, certs, roles, roleDetail) {
     <!-- Statut CA -->
     <div class="card-grid">
         <div class="card">
-            <div class="card-label">CA Racine</div>
+            <div class="card-label">${t('pki.rootCa')}</div>
             <div class="card-value">${expBadge(rootExp)}</div>
             <div class="card-sub">SHA-256 : <code class="mono-tiny">${esc(s.root_fingerprint_sha256 || '—')}</code></div>
         </div>
         <div class="card">
-            <div class="card-label">CA Intermédiaire</div>
+            <div class="card-label">${t('pki.intermediateCa')}</div>
             <div class="card-value">${expBadge(intExp)}</div>
         </div>
         <div class="card">
-            <div class="card-label">Certificats émis</div>
+            <div class="card-label">${t('pki.certsIssued')}</div>
             <div class="card-value card-value-big">${s.cert_count !== undefined ? s.cert_count : '—'}</div>
         </div>
         <div class="card">
-            <div class="card-label">Serveur ACME</div>
+            <div class="card-label">${t('pki.acmeServer')}</div>
             <div class="card-value">${s.acme_enabled
-                ? '<span class="badge badge-ok">Actif</span>'
-                : '<span class="badge badge-warn">Inactif</span>'}</div>
+                ? `<span class="badge badge-ok">${t('pki.statusActive')}</span>`
+                : `<span class="badge badge-warn">${t('pki.statusInactive')}</span>`}</div>
         </div>
         <div class="card">
-            <div class="card-label">EAB (enrôlement)</div>
+            <div class="card-label">${t('pki.eabEnrollment')}</div>
             <div class="card-value">${s.eab_required
-                ? `<span class="badge badge-ok">Requis</span> <span class="help-text">${esc(s.eab_policy || '')}</span>`
-                : `<span class="badge badge-warn">Non requis</span> <span class="help-text">${esc(s.eab_policy || '')}</span>`}</div>
+                ? `<span class="badge badge-ok">${t('pki.required')}</span> <span class="help-text">${esc(s.eab_policy || '')}</span>`
+                : `<span class="badge badge-warn">${t('pki.notRequired')}</span> <span class="help-text">${esc(s.eab_policy || '')}</span>`}</div>
         </div>
     </div>
 
     <!-- URLs de distribution -->
-    <div class="section-title">URLs de distribution (publiques)</div>
+    <div class="section-title">${t('pki.distributionUrls')}</div>
     <div class="url-list">
-        ${_urlRow('CA Racine PEM', s.root_pem_url)}
-        ${_urlRow('Chaîne complète PEM', s.chain_pem_url)}
-        ${_urlRow('CRL PEM', s.crl_url)}
-        ${_urlRow('Directory ACME', s.acme_directory)}
+        ${_urlRow(t('pki.rootCaPem'), s.root_pem_url)}
+        ${_urlRow(t('pki.fullChainPem'), s.chain_pem_url)}
+        ${_urlRow(t('pki.crlPem'), s.crl_url)}
+        ${_urlRow(t('pki.acmeDirectory'), s.acme_directory)}
     </div>
 
     <!-- Rôles ACME -->
-    <div class="section-title">Rôle ACME — politique d'émission</div>
+    <div class="section-title">${t('pki.acmeRolePolicy')}</div>
     ${_renderAcmeRoles(roles, roleDetail)}
 
     <!-- Inventaire certs -->
-    <div class="section-title">Inventaire des certificats</div>
+    <div class="section-title">${t('pki.certInventory')}</div>
     <div class="table-wrapper">
         <table>
             <thead><tr>
-                <th>Numéro de série</th><th>SANs</th><th>Expiration</th>
-                <th>Statut</th><th>Action</th>
+                <th>${t('pki.serialNumber')}</th><th>SANs</th><th>${t('pki.expiration')}</th>
+                <th>${t('common.status')}</th><th>${t('common.actions')}</th>
             </tr></thead>
             <tbody>${certRows}</tbody>
         </table>
@@ -144,10 +144,10 @@ function _renderPkiPage(s, certs, roles, roleDetail) {
 
 function _renderAcmeRoles(roles, detail) {
     if (!roles || roles.status === 'error' || !roles.roles || roles.roles.length === 0) {
-        return '<div class="empty-state" style="padding:0.5rem">Aucun rôle ACME configuré</div>';
+        return `<div class="empty-state" style="padding:0.5rem">${t('pki.noAcmeRoles')}</div>`;
     }
     const roleList = roles.roles.map(r => `<code>${esc(r)}</code>`).join(', ');
-    if (!detail) return `<div class="help-text">Rôles : ${roleList}</div>`;
+    if (!detail) return `<div class="help-text">${t('pki.rolesLabel')} ${roleList}</div>`;
 
     const domains = (detail.allowed_domains || []).join(', ') || '—';
     const flags = [
@@ -157,12 +157,12 @@ function _renderAcmeRoles(roles, detail) {
     ].filter(Boolean).join(', ') || '—';
 
     return `<div class="url-list" style="gap:0.3rem">
-        <div class="url-row"><span class="url-label">Rôle actif</span><code class="url-value">${esc(detail.role_name)}</code></div>
-        <div class="url-row"><span class="url-label">Domaines autorisés</span><code class="url-value">${esc(domains)}</code></div>
-        <div class="url-row"><span class="url-label">TTL max</span><code class="url-value">${esc(detail.max_ttl || '—')}</code></div>
-        <div class="url-row"><span class="url-label">Flags</span><code class="url-value">${esc(flags)}</code></div>
-        <div class="url-row"><span class="url-label">IP SANs</span><code class="url-value">${detail.allow_ip_sans ? '✅ autorisés' : '❌ refusés'}</code></div>
-        <div class="url-row"><span class="url-label">Localhost</span><code class="url-value">${detail.allow_localhost ? '✅ autorisé' : '❌ refusé'}</code></div>
+        <div class="url-row"><span class="url-label">${t('pki.activeRole')}</span><code class="url-value">${esc(detail.role_name)}</code></div>
+        <div class="url-row"><span class="url-label">${t('pki.allowedDomains')}</span><code class="url-value">${esc(domains)}</code></div>
+        <div class="url-row"><span class="url-label">${t('pki.maxTtl')}</span><code class="url-value">${esc(detail.max_ttl || '—')}</code></div>
+        <div class="url-row"><span class="url-label">${t('pki.flags')}</span><code class="url-value">${esc(flags)}</code></div>
+        <div class="url-row"><span class="url-label">IP SANs</span><code class="url-value">${detail.allow_ip_sans ? '✅ ' + t('pki.allowed') : '❌ ' + t('pki.denied')}</code></div>
+        <div class="url-row"><span class="url-label">Localhost</span><code class="url-value">${detail.allow_localhost ? '✅ ' + t('pki.allowedM') : '❌ ' + t('pki.deniedM')}</code></div>
     </div>`;
 }
 
@@ -171,7 +171,7 @@ function _urlRow(label, url) {
     return `<div class="url-row">
         <span class="url-label">${esc(label)}</span>
         <code class="url-value">${esc(url)}</code>
-        <button class="btn-copy" onclick="navigator.clipboard.writeText(${JSON.stringify(url)})" title="Copier">⎘</button>
+        <button class="btn-copy" onclick="navigator.clipboard.writeText(${JSON.stringify(url)})" title="${t('common.copy')}">⎘</button>
     </div>`;
 }
 
@@ -180,34 +180,34 @@ function _renderPkiSetupPanel() {
     return `
     <div class="page-header"><h2>PKI Certificate Authority</h2></div>
     <div class="empty-state">
-        <p>La PKI interne n'est pas encore initialisée.</p>
-        <p>Une fois configurée, les WAF Caddy pourront obtenir leurs certificats TLS via ACME.</p>
-        ${isAdmin() ? '<button class="btn btn-primary" onclick="openModal(\'modalPkiSetup\')">Initialiser la PKI</button>' : '<p class="help-text">Contactez un administrateur pour initialiser la PKI.</p>'}
+        <p>${t('pki.notInitialized')}</p>
+        <p>${t('pki.setupHelp')}</p>
+        ${isAdmin() ? `<button class="btn btn-primary" onclick="openModal('modalPkiSetup')">${t('pki.initializePki')}</button>` : `<p class="help-text">${t('pki.contactAdmin')}</p>`}
     </div>`;
 }
 
 /* ─── Actions PKI ─── */
 async function pkiRevoke(serial) {
-    if (!confirm(`Révoquer le certificat ${serial} ?`)) return;
+    if (!confirm(t('pki.confirmRevoke', { serial }))) return;
     const result = await api(`/pki/certs/${encodeURIComponent(serial)}/revoke`, { method: 'POST', body: '{}' });
     if (result.status === 'ok') {
         loadPki();
     } else {
-        _pkiShowError('Erreur révocation : ' + (result.message || 'échec'));
+        _pkiShowError(t('pki.errorRevoke') + ' ' + (result.message || t('pki.failed')));
     }
 }
 
 async function pkiRotate() {
-    if (!confirm('Effectuer une rotation de la CA intermédiaire ? (les anciens certs restent valides)')) return;
+    if (!confirm(t('pki.confirmRotate'))) return;
     const result = await api('/pki/ca/rotate', {
         method: 'POST',
         body: JSON.stringify({ keep_old_issuer: true, overlap_ttl: '48h' }),
     });
     if (result.status === 'ok') {
-        _pkiShowError('Rotation effectuée — nouvel issuer : ' + (result.new_issuer_id || '?'), 'info');
+        _pkiShowError(t('pki.rotateDone') + ' ' + (result.new_issuer_id || '?'), 'info');
         loadPki();
     } else {
-        _pkiShowError('Erreur rotation : ' + (result.message || '—'));
+        _pkiShowError(t('pki.errorRotate') + ' ' + (result.message || '—'));
     }
 }
 
@@ -225,11 +225,11 @@ async function doPkiSetup() {
     const domains  = document.getElementById('pkiDomains').value.trim();
     const leafTtl  = document.getElementById('pkiLeafTtl').value.trim() || '720h';
 
-    if (!domains) { alert('Domaines autorisés requis'); return; }
+    if (!domains) { alert(t('pki.allowedDomainsRequired')); return; }
 
     const btn = document.querySelector('#modalPkiSetup .btn-primary');
     btn.disabled = true;
-    btn.textContent = 'Initialisation...';
+    btn.textContent = t('pki.initializing');
 
     const result = await api('/pki/setup', {
         method: 'POST',
@@ -237,13 +237,13 @@ async function doPkiSetup() {
     });
 
     btn.disabled = false;
-    btn.textContent = 'Initialiser';
+    btn.textContent = t('pki.initialize');
 
     if (result.status === 'ok') {
         closeModal('modalPkiSetup');
         loadPki();
     } else {
-        alert('Erreur : ' + (result.message || '—'));
+        alert(t('common.error') + ' : ' + (result.message || '—'));
     }
 }
 
@@ -254,11 +254,11 @@ async function doPkiIssue() {
     const altNames = document.getElementById('pkiIssueAltNames').value.trim();
     const ipSans   = document.getElementById('pkiIssueIpSans').value.trim();
 
-    if (!cn) { alert('Common Name requis'); return; }
+    if (!cn) { alert(t('pki.commonNameRequired')); return; }
 
     const btn = document.querySelector('#modalPkiIssue .btn-primary');
     btn.disabled = true;
-    btn.textContent = 'Émission...';
+    btn.textContent = t('pki.issuing');
 
     const result = await api('/pki/issue', {
         method: 'POST',
@@ -266,14 +266,14 @@ async function doPkiIssue() {
     });
 
     btn.disabled = false;
-    btn.textContent = 'Générer';
+    btn.textContent = t('pki.generate');
 
     if (result.status === 'ok') {
         closeModal('modalPkiIssue');
         _pkiShowIssuedCert(result);
         loadPki();
     } else {
-        alert('Erreur : ' + (result.message || '—'));
+        alert(t('common.error') + ' : ' + (result.message || '—'));
     }
 }
 
@@ -288,18 +288,17 @@ function _pkiShowIssuedCert(result) {
     const exp = result.expiration || '?';
     ov.innerHTML = `
         <div class="modal modal-lg">
-            <h2>Certificat émis — ${esc(cn)}</h2>
-            <div class="success-banner">Serial : ${esc(serial)} — expire : ${esc(String(exp))}</div>
-            <div class="error-banner">⚠️ Clé privée affichée une seule fois. Copiez-la et stockez-la maintenant.
-                Elle n'est ni stockée côté serveur, ni récupérable ensuite.</div>
-            <label>Clé privée</label>
+            <h2>${t('pki.certIssued')} — ${esc(cn)}</h2>
+            <div class="success-banner">${t('pki.serialLabel')} ${esc(serial)} — ${t('pki.expiresLabel')} ${esc(String(exp))}</div>
+            <div class="error-banner">⚠️ ${t('pki.privateKeyWarning')}</div>
+            <label>${t('pki.privateKey')}</label>
             <textarea class="mono-textarea" rows="7" readonly id="_issuedKey"></textarea>
-            <label>Certificat</label>
+            <label>${t('pki.certificate')}</label>
             <textarea class="mono-textarea" rows="6" readonly id="_issuedCert"></textarea>
-            <label>Chaîne CA</label>
+            <label>${t('pki.caChain')}</label>
             <textarea class="mono-textarea" rows="4" readonly id="_issuedChain"></textarea>
             <div class="modal-actions">
-                <button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Fermer</button>
+                <button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">${t('common.close')}</button>
             </div>
         </div>`;
     document.body.appendChild(ov);
